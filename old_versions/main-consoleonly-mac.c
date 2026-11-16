@@ -5,15 +5,13 @@
 /*
 -------------------------------------------------
 Authors:
-    Cy
+    
 
 Date Started:
     November 7, 2026
 
 Date Finished:
-    November 8, 2026 (day before an exam lol)
-Made for CSMC 11 QR, UP BAGUIO A.Y. 2026-2027
-ONLY CONSOLE DISPLAYING. 
+    idk
 
 
 Credits to very useful resources used throughout the project:
@@ -32,15 +30,14 @@ Contains game logic
 #include <math.h>
 #include <signal.h> // for aborting
 #include <stdbool.h> // for true or false because 1 or 0 SUCKS
-#ifdef _WIN32
-	#include <conio.h>
-#elif __APPLE__
-	#include <ncurses.h>
-    // from me 2 days later:
-    // FUCK YOU NCURSES
-#elif __linux__
-	#include <ncurses.h>
-	//#define getch()
+// use conio for windows,
+// ncurses for mac or linux
+// for compatibility, since getch() in mac or linux just
+// sucks and doesnt insta get input.
+#ifndef _WIN32
+    #include <ncurses.h>
+#else
+    #include <conio.h>
 #endif
 
 //#include <conio.h> // MOVE AWAY FROM CONIO. NEEDS TO BE SUPPORTED ON BOTH WINDOWS AND MAC
@@ -74,24 +71,20 @@ Contains game logic
 // The wacky thingies are ANSI codes.
 #define DEBUG_MODE 1 // change to 0 to disable debug printss
 
-// for windows, mac, and linux compatability for ncurses
-// linux compatability is basically the same as
-// mac but i wrote this part on onlinegdb
-// which uses a linux env.
-#ifdef _WIN32
-	#define print(fmt, ...) printf(fmt, ##__VA_ARGS__)
+// compatability nightmare
+// printing in ncurses is wildly different,
+// so i have to add completely different code for it.
+// thank GOD macros are so useful
+#ifndef _WIN32 // mac and linux support
+    #define print(fmt, ...) printw(fmt, ##__VA_ARGS__); refresh()
+	#define clearscreen() clear()
+	#define scan(fmt, ...) noraw(); echo(); scanw(fmt, ##__VA_ARGS__); refresh(); raw(); noecho();
+#else // windows support
+    #define print(fmt, ...) printf(fmt, ##__VA_ARGS__)
 	#define clearscreen() print("\033[2J")
 	#define scan(fmt, ...) scanf(fmt, ##__VA_ARGS__)
-#elif __APPLE__
-	#define print(fmt, ...) printw(fmt, ##__VA_ARGS__); refresh()
-	#define clearscreen() clear()
-	#define scan(fmt, ...) noraw(); echo(); scanw(fmt, ##__VA_ARGS__); refresh(); raw(); noecho();
-#elif __linux__
-	#define print(fmt, ...) printw(fmt, ##__VA_ARGS__); refresh()
-	#define clearscreen() clear()
-	#define scan(fmt, ...) noraw(); echo(); scanw(fmt, ##__VA_ARGS__); refresh(); raw(); noecho();
 #endif
-
+    
 // have to completely remove the
 // ansi codes bvecause NCURSES SUCKS AND DOESNT SUPPORT IT!
 #define error(fmt, ...) print("FATAL ERROR [%s : %d] : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); raise(SIGABRT)
@@ -356,8 +349,8 @@ int grabinput() {
         error("KeyboardEscape");
     }
     if (ch == 'q') { // give a goodbye messag end a confirmation
-        print("WARNING: Pressed quit key 'q'. Press enter to close the program.");
-        grabinput();
+        warning("Pressed quit key 'q'. Press enter to close the program.");
+        getch();
         error("q quit");
     }
 
@@ -527,7 +520,7 @@ void PROMPT_SETTINGS() {
         NUM_OF_BLOCK = blocks;
         print("Number of blocks to be generated: %d\n", NUM_OF_BLOCK);
         
-    }
+    } else NUM_OF_BLOCK = 0; // if not difficult
     
     {
         int food = -1;
