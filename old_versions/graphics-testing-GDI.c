@@ -34,7 +34,7 @@ gcc graphics-testing.c -lgdi32 -o output/graphics-testing.exe -Wall; ./output/gr
 #include <process.h>
 #include <signal.h> // for aborting
 
-#include <d2d1.h> // REQUIRES A MODERN C COMPILER. i had a x32 version (MinGW.org GCC-6.3.0-1) 6.3.0 i had to uninstgall then install x64. followed https://code.visualstudio.com/docs/cpp/config-mingw
+// #include <d2d1.h> // REQUIRES A MODERN C COMPILER. i had a x32 version (MinGW.org GCC-6.3.0-1) 6.3.0 i had to uninstgall then install x64. followed https://code.visualstudio.com/docs/cpp/config-mingw
 
 #define FRAME_RATE 60
 

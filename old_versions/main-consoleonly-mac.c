@@ -1,3 +1,10 @@
+/*my dumbass thought ncurses.h wasnt supported on windows and thats
+why theres so much bullshit about OS. god damn it. alot of the bullshit
+conio and ncurses things are redundant. new updated file is
+main-consoleonly-compat.c*/
+
+
+
 /* BS COMPUTER SCIENCE PROJECT -- SNAKE GAME */
 /* ONLY CONSOLE IS SUPPORTED */
 /* MAC, LINUX, AND WINDOWS COMPATIBLE */
@@ -683,29 +690,29 @@ nuh_uh: // the lazy method lol
 int main() {
     // scanf("%d");
     
-    #ifdef __linux__
-        initscr();
-        raw();
-        noecho();
-        flushinp();
-    #elif __APPLE__
+    #ifndef _WIN32
+        debug("NOT ON WINDOWS. EITHER MAC OR LINUX");
         initscr();
         raw();
         noecho();
         flushinp();
     #endif
+
+    #if __has_include(<conio.h>)
+        debug("CONIO FOUND.");
+    #elif __has_include(<ncurses.h>)
+        debug("NCURSES FOUND.");
+    #endif
     
     // MAIN_MENU();
     // GAME_LOOP();
-    
+
     while (RETURN_TO_MENU) {
         MAIN_MENU();
         GAME_LOOP();
     }
-    
-    #ifdef __linux__
-        endwin();
-    #elif __APPLE__
+
+    #ifndef _WIN32
         endwin();
     #endif
     return 0;
