@@ -465,6 +465,10 @@ DWORD getAllChildren(LPCWSTR dir, LPCWSTR **arraybuffer) {
     
 }
 
+// ------- END OF PATH FUNCTIONS ------- //
+
+// ------- GRAPHICS RELATED FUNCTIONS ------- //
+
 /// @brief read thru a config file and assign the necessary vars to imagearray
 /// @param configfilepath 
 /// @param imagedatmodifying address of the image(s) image array
@@ -540,7 +544,8 @@ void readConfig(LPCWSTR configfilepath, ImageArray *imagedatmodifying) {
 /// @param image_or_folder_name the thing to load. can be a folder (if animation) or .bmp (if standalone)
 /// @param layer the draw order. 0 = highest priority
 /// @param framerate if its an animation, the framerate. (tied to FRAME_RATE)
-void loadimage(LPCWSTR image_or_folder_name, double layer) {
+/// @return address to the ImageArray in MEM_IMAGES. just realized doing this really fucks up the layering thing. oops!
+ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     // if image:
     // image.bmp file
 
@@ -571,6 +576,7 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
     // differentiating between images and animations
     ImageArray imagedat = newImageArray();
     imagedat.name = trimmed;
+    imagedat.layer = layer;
 
     Image *images = NULL;
     LPCWSTR *files;
@@ -578,7 +584,7 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
     DWORD nimages;
     if (isBMP) { // is a BMP
         debug("loading as image");
-        safemalloc(files, getFullPathLength(image_or_folder_name) * sizeof(WCHAR))
+        safemalloc(files, sizeof(LPCWSTR))
         files[0] = image_or_folder_name;
         nfiles = 1;
         nimages = 1;
@@ -617,7 +623,7 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
     saferealloc(images, nimages * sizeof(Image));
     debug("IMAGES TO LOAD:");
     for (int i = 0; i<nimages; i++) {
-        LPCWSTR name = nimages == 1 ? image_or_folder_name : NULL;
+        LPCWSTR name = isBMP ? image_or_folder_name : NULL;
         if (name == NULL) { // its an animation
             // gets the index. converts index to WCHAR
             LPWSTR indexWCHAR;
@@ -635,13 +641,17 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
             wcscpy(withProperOrder, trimmed);
             wcscat(withProperOrder, indexWCHAR);
             wcscat(withProperOrder, L".bmp");
-            withProperOrder[orderlen] = '\0';
+            // withProperOrder[orderlen] = '\0';
             wdebug(L"%s", withProperOrder);
 
             // get index of first occurance
             // all of this bullshit because we cant assume that the files r in perfect order
             // at least this makes sure that we are in perfect order
             int index = getFirstOccurenceInFileArray(withProperOrder, files, nfiles);
+            if (index < 0) {
+                wwarn(L"Missing animation frame. Expecting to find %s but couldnt find it.", withProperOrder);
+                error("Read the warning");
+            }
             debug("index %d", index);
             name = files[index];
 
@@ -672,12 +682,16 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
 
     imagedat.image_pointer = images;
 
-    MEM_IMAGES = realloc(MEM_IMAGES, (IMAGES_LOADED + 1) * sizeof(ImageArray));
+    // p.s. this doesnt sort the array by layer yet :(
+    saferealloc(MEM_IMAGES, (IMAGES_LOADED + 1) * sizeof(ImageArray));
     MEM_IMAGES[IMAGES_LOADED] = imagedat;
-    IMAGES_LOADED++;
+    // IMAGES_LOADED++;
 
     freeFiles(files, nfiles);
+    return &MEM_IMAGES[IMAGES_LOADED++];
 }
+
+
 
 void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     debug("CREATE");
