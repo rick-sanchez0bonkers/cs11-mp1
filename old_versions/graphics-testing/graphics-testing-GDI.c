@@ -57,6 +57,8 @@ gcc graphics-testing-GDI.c -lgdi32 -Wall -o graphics-testing-GDI.exe; ./graphics
 #define wdebug(fmt, ...) if (DEBUG_MODE) wprintf(L"\033[34m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__) // omitting file name cuz no idea how to convert it to wchar_t*
 #define wwarn(fmt, ...) wprintf(L"\033[43m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__) // omitting file name cuz no idea how to convert it to wchar_t*
 #define error(fmt, ...) printf("\033[41m[%s:%d]\033[0m : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); raise(SIGABRT)
+#define print(fmt, ...) printf(fmt "\n", ##__VA_ARGS__)
+#define wprint(fmt, ...) wprintf(fmt L"\n", ##__VA_ARGS__)
 // adds error checking
 #define safemalloc(pointer, size) \
     pointer = malloc(size); \
@@ -102,12 +104,12 @@ typedef struct {
     int framerate; // how much frames to wait before the next frame gets swapped
     int currframe; // what image are we on
     int loop; // if it loops or not. boolean int
+    int enabled; // if it renders or not. boolean int
     double opacity; // 255 (opaque) to 0 (transparent)
     double rotation; // in degrees
     Vector2 position; // where on the screen to render
     LPCWSTR name; // the file name. if its an animation, gets the name of the first file and removes the number at the end (e.g. sad0.bmp -> sad)
     Image *image_pointer; // pointer to the array that contains the loaded images [one or more].
-
 } ImageArray;
 
 // global vars
@@ -150,6 +152,72 @@ unsigned __stdcall thread(void *args) {
 
 // ------- HELPER FUNCTIONS ------- //
 
+// frees the filearray u get from getAllChildren
+void freeFiles(LPCWSTR* files, DWORD nfiles) {
+    for (int i = 0; i<nfiles; i++) {
+        free((void *) files[i]);
+        files[i] = NULL;
+    }
+    free(files);
+}
+
+/// @brief makes a fresh image array with default params
+/// @return an image array
+ImageArray newImageArray() {
+    // typedef struct {
+    //     double layer; // draw order. used to sort the array. lower layer = drawn first
+    //     int frames; // number of images
+    //     int framecount; // how much frames have elapsed?
+    //     int framerate; // how much frames to wait before the next frame gets swapped
+    //     int currframe; // what image are we on
+    //     int loop; // if it loops or not. boolean int
+    //     int enabled; // if it renders or not. boolean int
+    //     double opacity; // 255 (opaque) to 0 (transparent)
+    //     double rotation; // in degrees
+    //     Vector2 position; // where on the screen to render
+    //     LPCWSTR name; // the file name. if its an animation, gets the name of the first file and removes the number at the end (e.g. sad0.bmp -> sad)
+    //     Image *image_pointer; // pointer to the array that contains the loaded images [one or more].
+    // } ImageArray;
+
+    return (ImageArray) {
+        .layer = 0.0,
+        .frames = 1,
+        .framecount = -1, // ignored if only 1 frame
+        .framerate = -1, // ignored if only 1 frame
+        .currframe = 1,
+        .loop = 0,
+        .enabled = 1,
+        .opacity = 255.0,
+        .rotation = 0.0,
+        .position = (Vector2) {.x = 0, .y = 0}, // dont got a function for this yet
+        // .name                omitted
+        // .image_pointer       omitted
+    };
+}
+
+/// @brief prints the images stored in memory
+void printmemimages() {
+    printf("Number of images: %llu\n", IMAGES_LOADED);
+    for (int i = 0; i < IMAGES_LOADED; i++) {
+        print("IMAGE %d", i);
+        ImageArray data = MEM_IMAGES[i];
+        wprint(L"\tNAME: %s", data.name);
+        print("\tLAYER: %f", data.layer);
+        print("\tFRAMES: %d", data.frames);
+        print("\tFRAMECOUNT: %d", data.framecount);
+        print("\tFRAMERATE: %d", data.framerate);
+        print("\tLOOP: %d", data.loop);
+        print("\tENABLED: %d", data.enabled);
+        print("\tOPACITY: %f", data.opacity);
+        print("\tROTATION: %f", data.rotation);
+        print("\tPOSITION: (%d, %d)", data.position.x, data.position.y);
+
+        Image imagedata = *data.image_pointer;
+        BITMAP bitmap = imagedata.bitmap;
+
+        print("\tDIMENSIONS: (%ld, %ld)", bitmap.bmWidth, bitmap.bmHeight);
+    }
+}
 
 
 // ------- FUNCTIONS FOR PATHS ------- //
@@ -397,21 +465,6 @@ DWORD getAllChildren(LPCWSTR dir, LPCWSTR **arraybuffer) {
     
 }
 
-void printmemimages() {
-    printf("Number of images: %llu\n", IMAGES_LOADED);
-    for (int i = 0; i < IMAGES_LOADED; i++) {
-        printf("IMAGE %d\n", i);
-        ImageArray data = MEM_IMAGES[i];
-        wprintf(L"NAME: %s\n", data.name);
-        printf("LAYER: %d\n", data.layer);
-        printf("FRAMES: %d\n", data.frames);
-        printf("FRAMERATE: %d\n", data.framerate);
-        Image imagedata = *data.image_pointer;
-        BITMAP bitmap = imagedata.bitmap;
-        printf("DIMENSIONS: (%ld, %ld)\n", bitmap.bmWidth, bitmap.bmHeight);
-    }
-}
-
 /// @brief read thru a config file and assign the necessary vars to imagearray
 /// @param configfilepath 
 /// @param imagedatmodifying address of the image(s) image array
@@ -427,6 +480,7 @@ void readConfig(LPCWSTR configfilepath, ImageArray *imagedatmodifying) {
         // just in case
         if (buffer[i] == ' ') {wwarn(L"In config file %s, a SPACE was found. Do not put spaces at all", configfilepath); error("Read the warning");}
 
+        // this is just a parser. very annoying to think about indexes in ur head
         if ((buffer[i] == '\n') || i == (read - 1)) { // its an assignment
           for (int j = start; j<i; j++) {
                 if (buffer[j] == ' ') {wwarn(L"In config file %s, a SPACE was found. Do not put spaces at all", configfilepath); error("Read the warning");}
@@ -470,6 +524,8 @@ void readConfig(LPCWSTR configfilepath, ImageArray *imagedatmodifying) {
                     } else if (0 == strcmp(var, "loop")) {
                         imagedatmodifying->loop = value;
                     }
+                    free(var);
+                    free(strvalue);
                     break;
                 }
             }
@@ -513,31 +569,24 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
     wdebug(L"path trimmed: %s", trimmed);
 
     // differentiating between images and animations
-    ImageArray imagedat = {
-        .framecount = -1, // ignored if only 1 frame
-        .currframe = 1,
-        .position = (Vector2) {.x = 0, .y = 0}, // dont got a function for this yet
-        .layer = layer,
-        .rotation = 0,
-        .opacity = 255,
-        .name = trimmed,
-        .loop = 0,
-        .frames = 1,
-        .framerate = -1, // ignored if only 1 frame
-    };
+    ImageArray imagedat = newImageArray();
+    imagedat.name = trimmed;
+
     Image *images = NULL;
     LPCWSTR *files;
+    DWORD nfiles;
     DWORD nimages;
     if (isBMP) { // is a BMP
         debug("loading as image");
         safemalloc(files, getFullPathLength(image_or_folder_name) * sizeof(WCHAR))
         files[0] = image_or_folder_name;
+        nfiles = 1;
         nimages = 1;
     } else if (!isBMP && !isFile(image_or_folder_name)) { // not a bmp and is a folder
         debug("loading as animation");
         // looad images
         // LPCWSTR *files;
-        DWORD nfiles = getAllChildren(image_or_folder_name, &files);
+        nfiles = getAllChildren(image_or_folder_name, &files);
         
         // make sure everything is valid
         for (int i = 0; i < nfiles; i++) {
@@ -592,13 +641,12 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
             // get index of first occurance
             // all of this bullshit because we cant assume that the files r in perfect order
             // at least this makes sure that we are in perfect order
-            int index = getFirstOccurenceInFileArray(withProperOrder, files, nimages + 1);
+            int index = getFirstOccurenceInFileArray(withProperOrder, files, nfiles);
             debug("index %d", index);
             name = files[index];
 
             free(withProperOrder);
             free(indexWCHAR);
-
         }
         wdebug(L"%s", name);
 
@@ -627,6 +675,8 @@ void loadimage(LPCWSTR image_or_folder_name, double layer) {
     MEM_IMAGES = realloc(MEM_IMAGES, (IMAGES_LOADED + 1) * sizeof(ImageArray));
     MEM_IMAGES[IMAGES_LOADED] = imagedat;
     IMAGES_LOADED++;
+
+    freeFiles(files, nfiles);
 }
 
 void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -654,6 +704,11 @@ void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     for (int i = 0; i < (int) nfiles; i++) {
         loadimage(files[i], 0);
     }
+
+    // do absolutely not clean up
+    // loaded images use addresses from
+    // the given files.
+    // freeFiles(files, nfiles); // clean up
 
     printmemimages();
 }
