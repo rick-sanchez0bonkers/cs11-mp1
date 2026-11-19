@@ -1,3 +1,15 @@
+// THIS FILE IS FOR CREATING THE BUILDING BLOCKS
+// OF MAKING A FULLY FLEDGED GRAPHICS-FRIENDY WINDOWS
+// things added:
+// windows app essentials (WM_CREATE, WM_DESTROY, & WM_PAINT)
+// keyboard & mouse input support
+// rendering support
+// .bmp support
+
+// time taken:
+// 5 days (this shit complicated to learn from the ground up)
+
+
 // file to mess around with making 
 // graphics.
 // since <graphics.h> is literally nonexistent for me
@@ -19,7 +31,7 @@ hbrushes and whatever)
 
 
 full command (in powershell)
-gcc graphics-testing.c -lgdi32 -o output/graphics-testing.exe -Wall; ./output/graphics-testing.exe
+gcc graphics-testing-GDI.c -lgdi32 -Wall -o graphics-testing-GDI.exe; ./graphics-testing-GDI.exe
                                                                     ^ runs the .exe immediately
 
 */
@@ -39,9 +51,11 @@ gcc graphics-testing.c -lgdi32 -o output/graphics-testing.exe -Wall; ./output/gr
 
 #define FRAME_RATE 60
 #define DEBUG_MODE 1
+#define CONFIGSIZE 1024*2
 
 #define debug(fmt, ...) if (DEBUG_MODE) printf("\033[34m[%s:%d]\033[0m : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
 #define wdebug(fmt, ...) if (DEBUG_MODE) wprintf(L"\033[34m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__) // omitting file name cuz no idea how to convert it to wchar_t*
+#define wwarn(fmt, ...) wprintf(L"\033[43m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__) // omitting file name cuz no idea how to convert it to wchar_t*
 #define error(fmt, ...) printf("\033[41m[%s:%d]\033[0m : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); raise(SIGABRT)
 // adds error checking
 #define safemalloc(pointer, size) \
@@ -53,8 +67,8 @@ gcc graphics-testing.c -lgdi32 -o output/graphics-testing.exe -Wall; ./output/gr
     pointer = realloc(pointer, size); \
     if (pointer == NULL) { \
         error("Realloc failed to allocate memory"); \
-    } \
-    debug("Successful realloc. Pointer address: %p, number of bytes: %d", pointer, (int) (size));
+    }
+    // debug("Successful realloc. Pointer address: %p, number of bytes: %d", pointer, (int) (size));
 
 // free the the htings that getAllChildren()
 // rely on
@@ -68,25 +82,37 @@ typedef struct {
     int y;
 } Vector2;
 
+// double version of Vector2
 typedef struct {
-    BITMAP *bitmap; // contains size
-    HBITMAP *hbitmap; // the actual bitmap
+    double x;
+    double y;
+} dVector2;
+
+// Image
+typedef struct {
+    BITMAP bitmap; // contains size
+    HBITMAP hbitmap; // the actual rgb information
 } Image;
 
 // ImageArray
 typedef struct {
-    int layer; // draw order. used to sort the array. lower layer = drawn first
+    double layer; // draw order. used to sort the array. lower layer = drawn first
     int frames; // number of images
+    int framecount; // how much frames have elapsed?
     int framerate; // how much frames to wait before the next frame gets swapped
     int currframe; // what image are we on
-    int loop; // if it loops or not
+    int loop; // if it loops or not. boolean int
+    double opacity; // 255 (opaque) to 0 (transparent)
+    double rotation; // in degrees
+    Vector2 position; // where on the screen to render
     LPCWSTR name; // the file name. if its an animation, gets the name of the first file and removes the number at the end (e.g. sad0.bmp -> sad)
-    Image *image_pointer; // pointer to the array that contains the loaded images [one or more]. double pointer since itll be malloc'd
+    Image *image_pointer; // pointer to the array that contains the loaded images [one or more].
 
 } ImageArray;
 
 // global vars
 ImageArray* MEM_IMAGES;
+size_t IMAGES_LOADED = 0;
 LPCWSTR bitmapsdir = L"bmp";
 LPCWSTR c_filedir = L"graphics-testing-GDI.c";
 
@@ -103,17 +129,28 @@ Vector2 MOUSE = {.x = 0, .y = 0};
 // not the best way to implement this because
 // the update lags behind, but whatever. good enough
 unsigned __stdcall thread(void *args) {
-    HWND hwnd = *(HWND*) args; // retrieve the hwnd parm
-    debug("Thread running\n");
+    HWND hwnd = (HWND) args; // retrieve the hwnd parm
+    debug("Thread running");
+
+    // make sure we didnt fuck anything up
+    // verify if hwnd is actually linked to a window
+    if (!IsWindow(hwnd)) {
+        error("THREAD DID NOT GET HWND HANDLE SAFELY. FRAME LOOP IS NOT WORKING PROPERLY.");
+    }
+
     while (THREAD_RUNNING) {
         if (THREAD_ENABLED) 
             PostMessage(hwnd, WM_PAINT, 0, 0);
         Sleep(max(1000/FRAME_RATE, 1));
     }
-    debug("Thread ended\n");
+    debug("Thread ended");
 
     return 0;
 }
+
+// ------- HELPER FUNCTIONS ------- //
+
+
 
 // ------- FUNCTIONS FOR PATHS ------- //
 // credit:
@@ -135,12 +172,54 @@ int isFile(LPCWSTR path) {
     return (attributes != INVALID_FILE_ATTRIBUTES && (0 == (attributes & FILE_ATTRIBUTE_DIRECTORY))); // actually exists and is a file
 }
 
+/// @brief compare if the extension of a path matches the extension given
+/// @param path path to check
+/// @param extension extension (e.g. L"bmp")
+/// @return boolean int
+int compareExtension(LPCWSTR path, LPWSTR extension) {
+    // most of thios code is from trimPath
+    size_t pathlen = wcslen(path);
+    int indexofdot = -1;
+    for (int i=pathlen; i>0; i--) {
+        if (path[i] == L'.') { // if we went thru the entire file name
+            indexofdot = i;
+            break;
+        }
+        if (path[i] == L'\\') {
+            break;
+        }
+    }
+
+    if (indexofdot < 0) { // no dot
+        return 0;
+    }
+
+    // debug("Calculated space: %d", pathlen - indexofdot);
+    LPWSTR dest = NULL;
+    // properly calculated the string size (with \0 included)
+    safemalloc(dest, (pathlen - indexofdot) * sizeof(WCHAR)); 
+
+    for (int i = 0; i < pathlen-indexofdot; i++) {
+        dest[i] = path[indexofdot + 1 + i];
+        // wdebug(L"CHAR TO COPYING: %c\n", path[indexofdot + 1 + i]);
+    }
+    // does the actual comparison lol. getting the extension takes like 50 billion lines
+    // but god bless wchar.h
+    int comparison = wcscmp(dest, extension);
+    free(dest); // free dat shit
+
+    // why the hell does wcscmp
+    // return 0 if its equal
+    // ^ its for sorting and stuff
+    return 0 == comparison;
+}
+
 /// @brief remove the extension name. (e.g. bmp\\sad.bmp -> sad)
 /// @param path directory
 /// @param modifying address of LPWSTR place to output
 void trimExtension(LPCWSTR path, LPWSTR *modifying) {
     size_t pathlen = wcslen(path);
-    LPWSTR dest;
+    LPWSTR dest = NULL;
     for (int i=pathlen; i>0; i--) {
         // wprintf(L"%c", path[i]);
         if (path[i] == L'.') { // dot found
@@ -155,23 +234,72 @@ void trimExtension(LPCWSTR path, LPWSTR *modifying) {
             break;
         }
     }
-    debug("dest: %p", dest);
+    // debug("dest: %p", dest);
     *modifying = dest;
-    debug("modifying: %p", modifying);
-    wdebug("%s", dest);
+    // debug("modifying: %p", modifying);
+    // wdebug(L"%s", dest);
 }
 
 /// @brief only get the file/folder name. (e.g. graphics-testing\\bmp\\sadanim -> sadanim)
 /// @param path directory
 /// @param modifying address of string to place output
 void trimPath(LPCWSTR path, LPWSTR* modifying) {
+    // debug("trim path");
+    size_t pathlen = wcslen(path);
+    int indexofslashslash = 0;
+    for (int i=pathlen; i>0; i--) {
+        if (path[i] == L'\\') { // if we went thru the entire file name
+            indexofslashslash = i;
+            break;
+        }
+    }
 
+    LPWSTR dest = NULL;
+    // properly calculated the string size (with \0 included)
+    safemalloc(dest, (pathlen - indexofslashslash) * sizeof(WCHAR)); 
+
+    // manually setting the chars because
+    // idk if theres a wchar function
+    // to only copy a specific section of 
+    // a string.
+    // i miss string.sub() in lua...
+    // or even slicing in python...
+    // i hate how tedious strings are in C god damn it
+    for (int i = 0; i < pathlen-indexofslashslash; i++) {
+        dest[i] = path[indexofslashslash + 1 + i];
+        // wdebug(L"CHAR TO COPYING: %c\n", path[indexofslashslash + 1 + i]);
+    }
+
+    // debug("dest: %p", dest);
+    *modifying = dest;
+    // debug("modifying: %p", modifying);
+    // wdebug(L"%s", dest);
 }
 
-// returns full path length
-// already includes null terminator
+
+/// @brief finds the index of the first occuring file with given filename
+/// @param filename filename only, not path. e.g. L"image.bmp"
+/// @param filearray file array from getAllChildren()
+/// @param number_of_files file count from getAllChildren()
+/// @return index of occurance. -1 if none found.
+int getFirstOccurenceInFileArray(LPCWSTR filename, LPCWSTR* filearray, DWORD number_of_files) {
+    for (int i = 0; i < (int) number_of_files; i++) {
+        LPCWSTR file = filearray[i];
+        LPWSTR trimmed;
+        trimPath(file, &trimmed);
+
+        if (wcscmp(trimmed, filename) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/// @brief returns full path length
+/// @param dir 
+/// @return full path length. already includes null terminator.
 DWORD getFullPathLength(LPCWSTR dir) {
-    return GetFullPathName(dir, 0, NULL, NULL);;
+    return GetFullPathName(dir, 0, NULL, NULL);
 }
 
 //https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfullpathnamew
@@ -183,7 +311,7 @@ LPWSTR getFullPathSafe(LPCWSTR dir) {
     DWORD pathlen = GetFullPathName(dir, 0, NULL, NULL);
     // wdebug("Got pathlen %lu", pathlen);
 
-    LPWSTR buffer;
+    LPWSTR buffer = NULL;
     safemalloc(buffer, (pathlen + 1) * sizeof(WCHAR));
     DWORD pathlen2 = GetFullPathName(dir, pathlen, buffer, NULL); // patheln2 DOESNT include the null terminator
     // paranoia kicking in
@@ -192,35 +320,6 @@ LPWSTR getFullPathSafe(LPCWSTR dir) {
     } 
     // wdebug(L"Buffer: %s", buffer);
     return buffer;
-
-    // this shit below is completely unnecessary
-    // because passing in NULL as the buffer WORKS WITH ZERO FUCKKKK
-    
-    // WCHAR *buffer = L"hi"; // cant be 0 because itll overcount ffs fuck this dumb ass function bruh
-    // DWORD buflen = 3;
-    // while (1) { // a shitty loop to make sure i allocate enough memory for the damn thing
-    //     DWORD pathlen = GetFullPathName(dir, buflen, buffer, NULL);
-    //     printf("Got pathlen %lu\n", pathlen);
-    //     if (pathlen == 0) {
-    //         wprintf(L"ERROR: FAILED TO RETRIEVE FULL PATH OF DIR '%s'\n", dir);
-    //         free(buffer);
-    //         error("Failed to get the path of dir above.");
-    //     }
-    //     if (buflen < pathlen) { // funny thing, pathlen FIRST overcounts and then finally counts correctly. wow!
-    //         WCHAR *temp = realloc(buffer, pathlen * sizeof(WCHAR));
-    //         if (temp != NULL) {
-    //             buffer = temp;
-    //         } else {
-    //             free(buffer);
-    //             error("REALLOC FAILURE.");
-    //         }
-    //         buflen = pathlen;
-    //         continue;
-    //     }
-    //     printf("Pathlen: %lu\n", buflen);
-    //     break;
-    // }
-    // return (LPWSTR) buffer;
 }
 
 // credit: https://stackoverflow.com/questions/68215054/browse-a-whole-folder-in-c
@@ -231,14 +330,15 @@ LPWSTR getFullPathSafe(LPCWSTR dir) {
 /// @param dir 
 /// @param arraybuffer modifies the given buffer. pass in &arraybuffer.
 /// @return the number of files in the arraybuffer
-DWORD getAllChildren(LPCWSTR dir, LPWSTR **arraybuffer) {
+DWORD getAllChildren(LPCWSTR dir, LPCWSTR **arraybuffer) {
     LPWSTR fulldir = getFullPathSafe(dir);
-    wdebug(L"Get all children in dir %s\n", fulldir);
+    wdebug(L"Get all children in dir %s", fulldir);
     free(fulldir);
 
     // // WCHAR buff[wcslen(dir) + 1] = NULL; // have to initalize it bc malloc sux
     
-    LPWSTR buff = safemalloc(buff, (wcslen(dir) + 1) * sizeof(WCHAR)); // have to initalize it bc malloc sux
+    LPWSTR buff = NULL;
+    safemalloc(buff, (wcslen(dir) + 1 + 2) * sizeof(WCHAR)); // have to initalize it bc malloc sux
     wcscpy(buff, dir); // copy the dir
     wcscat(buff, L"\\*"); // append this thing, no idea what it does or means.
 
@@ -249,9 +349,15 @@ DWORD getAllChildren(LPCWSTR dir, LPWSTR **arraybuffer) {
     HANDLE currfilehandle = FindFirstFile(buff, &fd);
     int cond = currfilehandle != INVALID_HANDLE_VALUE;
 
+    if (!cond) { // big whoopsie
+        error("Failed to read first file.");
+    }
+
     // shit we want
-    LPWSTR *array = NULL;
+    LPCWSTR *array = NULL;
     DWORD number_of_files = 0;
+
+    LPWSTR filebuff = NULL;
 
     while (cond) {
         if (!isPath(fd.cFileName)) { // passing in things like "..\\folder" counts .. as a "file" so this check makes sure all the things r either folders or files.
@@ -259,45 +365,126 @@ DWORD getAllChildren(LPCWSTR dir, LPWSTR **arraybuffer) {
             // if we dont add the folder before the file, getfullpathsafe will assume its in the same directory
             // as the executazble
             size_t filenamelen = (wcslen(fd.cFileName) + 1);
-            LPWSTR filebuff;
-            safemalloc(filebuff, (wcslen(dir) + filenamelen + 5) * sizeof(WCHAR));
+            saferealloc(filebuff, (wcslen(dir) + filenamelen + 5) * sizeof(WCHAR)); // reuse filebuff
             wcscpy(filebuff, dir);
             wcscat(filebuff, L"\\");
             wcscat(filebuff, fd.cFileName);
 
-            DWORD fulldirlen = getFullPathLength(filebuff);// this is what we actually care about
-            LPWSTR fulldir = getFullPathSafe(filebuff); 
-            wdebug(L"Full dir: %s, length: %d", fulldir, (int) fulldirlen);
+            LPWSTR fulldirname = getFullPathSafe(filebuff); 
+            wdebug(L"Full dir: %s", fulldirname);
             
             // add the pointer to our array
-            saferealloc(array, (number_of_files+1 + 1) * sizeof(WCHAR*));
-            array[number_of_files] = fulldir;
+            saferealloc(array, (number_of_files+1) * sizeof(LPWSTR*));
+            array[number_of_files] = fulldirname;
             number_of_files++;
         }
         cond = FindNextFile(currfilehandle, &fd); // returns 0 if failure or just done
     }
     FindClose(currfilehandle);
-    free(buff);
 
     debug("Buffer:");
     for (int i=0; i<number_of_files; i++) {
-        LPWSTR file = array[i];
-        wdebug("%s", file);
+        LPCWSTR file = array[i];
+        wdebug(L"%s", file);
     }
 
     *arraybuffer = array; // make the arraybuffer point to array.
 
-    debug("Total number of files: %d\n", (int) number_of_files);
-    debug("array %p", array);
+    debug("Total number of files: %d", (int) number_of_files);
+    free(buff);
+    free(filebuff);
     return number_of_files;
     
+}
+
+void printmemimages() {
+    printf("Number of images: %llu\n", IMAGES_LOADED);
+    for (int i = 0; i < IMAGES_LOADED; i++) {
+        printf("IMAGE %d\n", i);
+        ImageArray data = MEM_IMAGES[i];
+        wprintf(L"NAME: %s\n", data.name);
+        printf("LAYER: %d\n", data.layer);
+        printf("FRAMES: %d\n", data.frames);
+        printf("FRAMERATE: %d\n", data.framerate);
+        Image imagedata = *data.image_pointer;
+        BITMAP bitmap = imagedata.bitmap;
+        printf("DIMENSIONS: (%ld, %ld)\n", bitmap.bmWidth, bitmap.bmHeight);
+    }
+}
+
+/// @brief read thru a config file and assign the necessary vars to imagearray
+/// @param configfilepath 
+/// @param imagedatmodifying address of the image(s) image array
+void readConfig(LPCWSTR configfilepath, ImageArray *imagedatmodifying) {
+    FILE *filepointer = _wfopen(configfilepath, L"rb");
+
+    char buffer[CONFIGSIZE];
+    size_t read = fread(buffer, sizeof(char), CONFIGSIZE-1, filepointer);
+    buffer[read] = '\0';
+
+    int start = 0;
+    for (int i = 0; i<read; i++) {
+        // just in case
+        if (buffer[i] == ' ') {wwarn(L"In config file %s, a SPACE was found. Do not put spaces at all", configfilepath); error("Read the warning");}
+
+        if ((buffer[i] == '\n') || i == (read - 1)) { // its an assignment
+          for (int j = start; j<i; j++) {
+                if (buffer[j] == ' ') {wwarn(L"In config file %s, a SPACE was found. Do not put spaces at all", configfilepath); error("Read the warning");}
+                if (buffer[j] == '=') { // equals sign
+                    // name of var
+                    // start to j-1
+                    char *var;
+                    int varlength = j - start;
+                    safemalloc(var, varlength * sizeof(char));
+                    memcpy(var, buffer + start, varlength);
+                    var[varlength] = '\0';
+
+                    debug("Got variable: %s", var);
+                    // value
+                    // j+1 to i-1
+                    int value;
+                    char *strvalue;
+                    int valuelength;
+                    if (i == (read - 1)) { // weird why it dont work for this case...
+                        valuelength = i - j;
+                    } else {
+                        valuelength = (i - 1) - (j + 1);
+                    }
+                    // debug("vlen: %d", valuelength);;
+                    // debug("i: %d", i);
+                    // debug("j: %d", j);
+                    // debug("i-1: %d", i-1);
+                    // debug("j+1: %d", j+1);
+                    safemalloc(strvalue, valuelength * sizeof(char));
+                    memcpy(strvalue, buffer + j + 1, valuelength);
+                    strvalue[valuelength] = '\0';
+
+                    value = atoi(strvalue);
+                    debug("Got value: %s [%d]", strvalue, value);
+
+                    // switches cant have char* so just a big hardcoded if else if
+                    // strcmp my beloved
+                    if (0 == strcmp(var, "framerate")) {
+                        debug("set framerate to %d", value);
+                        imagedatmodifying->framerate = value;
+                    } else if (0 == strcmp(var, "loop")) {
+                        imagedatmodifying->loop = value;
+                    }
+                    break;
+                }
+            }
+            start = i+1;
+        }
+    }
+
+    fclose(filepointer);
 }
 
 /// @brief loads an image to memory.
 /// @param image_or_folder_name the thing to load. can be a folder (if animation) or .bmp (if standalone)
 /// @param layer the draw order. 0 = highest priority
 /// @param framerate if its an animation, the framerate. (tied to FRAME_RATE)
-void loadimage(LPCWSTR image_or_folder_name) {
+void loadimage(LPCWSTR image_or_folder_name, double layer) {
     // if image:
     // image.bmp file
 
@@ -312,23 +499,145 @@ void loadimage(LPCWSTR image_or_folder_name) {
     wdebug(L"is file? %d", isFile(image_or_folder_name));
     wdebug(L"is path? %d", isPath(image_or_folder_name));
 
+    if (!isPath(image_or_folder_name)) {
+        error("Malformed path given.");
+    }
+
+    int isBMP = compareExtension(image_or_folder_name, L"bmp");
+    LPWSTR trimmedExtension; // cant just use 1 var since causes a leak
     LPWSTR trimmed;
-    trimExtension(image_or_folder_name, &trimmed);
-    debug("trimmed: %p", trimmed);
+    trimExtension(image_or_folder_name, &trimmedExtension);
+    trimPath(trimmedExtension, &trimmed);
+    free(trimmedExtension);
 
-    wdebug(L"%s", trimmed);
+    wdebug(L"path trimmed: %s", trimmed);
 
+    // differentiating between images and animations
+    ImageArray imagedat = {
+        .framecount = -1, // ignored if only 1 frame
+        .currframe = 1,
+        .position = (Vector2) {.x = 0, .y = 0}, // dont got a function for this yet
+        .layer = layer,
+        .rotation = 0,
+        .opacity = 255,
+        .name = trimmed,
+        .loop = 0,
+        .frames = 1,
+        .framerate = -1, // ignored if only 1 frame
+    };
+    Image *images = NULL;
+    LPCWSTR *files;
+    DWORD nimages;
+    if (isBMP) { // is a BMP
+        debug("loading as image");
+        safemalloc(files, getFullPathLength(image_or_folder_name) * sizeof(WCHAR))
+        files[0] = image_or_folder_name;
+        nimages = 1;
+    } else if (!isBMP && !isFile(image_or_folder_name)) { // not a bmp and is a folder
+        debug("loading as animation");
+        // looad images
+        // LPCWSTR *files;
+        DWORD nfiles = getAllChildren(image_or_folder_name, &files);
+        
+        // make sure everything is valid
+        for (int i = 0; i < nfiles; i++) {
+            LPCWSTR file = files[i];
+            if (!compareExtension(file, L"bmp") && !compareExtension(file, L"config")) { // neither .bmp or .config
+                wwarn(L"In animation folder '%s', file '%s' is neither .bmp nor .config.", image_or_folder_name, file);
+                error("See warning above.");
+            }
+        }
+        nimages = nfiles-1; // assuming everything is dandy
+        int indexofconfig = getFirstOccurenceInFileArray(L".config", files, nfiles);
+
+        if (indexofconfig < 0) {
+            wwarn(L"No '.config' file found for animation folder:\n\t%s", image_or_folder_name);
+            error("See warning above.");
+        }
+
+        debug("Index of .config: %d", indexofconfig);
+        readConfig(files[indexofconfig], &imagedat);
+        imagedat.frames = nimages;
+    } else {
+        // cant pass in the file name bc the file names r wchar_t* while
+        // error only supports char*
+        error("A file within the folder bitmaps folder is neither a .bmp nor a folder (animation).\nOffending file name cant be displayed (due to poor programming lol), find it yourself.");
+    }
+
+    // give space
+    saferealloc(images, nimages * sizeof(Image));
+    debug("IMAGES TO LOAD:");
+    for (int i = 0; i<nimages; i++) {
+        LPCWSTR name = nimages == 1 ? image_or_folder_name : NULL;
+        if (name == NULL) { // its an animation
+            // gets the index. converts index to WCHAR
+            LPWSTR indexWCHAR;
+            int iws = i/10 + 2;
+            safemalloc(indexWCHAR, iws * sizeof(WCHAR));
+            swprintf(indexWCHAR, iws, L"%d", i);
+            debug("iws: %d", iws);
+
+            // combine everything
+            LPWSTR withProperOrder;
+            int orderlen = wcslen(trimmed) + iws + 4; // iws accounts for \0 already
+            safemalloc(withProperOrder, orderlen * sizeof(WCHAR));
+            debug("ORDERLEN: %d", orderlen);
+            // trimmed + i's digits + .bmp + \0
+            wcscpy(withProperOrder, trimmed);
+            wcscat(withProperOrder, indexWCHAR);
+            wcscat(withProperOrder, L".bmp");
+            withProperOrder[orderlen] = '\0';
+            wdebug(L"%s", withProperOrder);
+
+            // get index of first occurance
+            // all of this bullshit because we cant assume that the files r in perfect order
+            // at least this makes sure that we are in perfect order
+            int index = getFirstOccurenceInFileArray(withProperOrder, files, nimages + 1);
+            debug("index %d", index);
+            name = files[index];
+
+            free(withProperOrder);
+            free(indexWCHAR);
+
+        }
+        wdebug(L"%s", name);
+
+
+        // load the actual image to memory
+        HBITMAP hBitmap = (HBITMAP)LoadImage(
+            NULL,                   // NULL when loading from a file
+            name,                   // File path
+            IMAGE_BITMAP,           // Type of image to load
+            0, 0,                   // Width and height (0 = use actual size)
+            LR_LOADFROMFILE         // Load from disk instead of a resource
+        );
+
+        
+        BITMAP bitmap; // fetch image information
+        GetObject(hBitmap, sizeof(bitmap), &bitmap);
+        // printf("Size X: %ld\n", bitmap.bmWidth);
+        // printf("Size Y: %ld\n", bitmap.bmHeight);
+
+        images[i].hbitmap = hBitmap;
+        images[i].bitmap = bitmap;
+    }
+
+    imagedat.image_pointer = images;
+
+    MEM_IMAGES = realloc(MEM_IMAGES, (IMAGES_LOADED + 1) * sizeof(ImageArray));
+    MEM_IMAGES[IMAGES_LOADED] = imagedat;
+    IMAGES_LOADED++;
 }
 
 void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    debug("CREATE\n");
+    debug("CREATE");
     
     // start the frame loop thread
     HANDLE hThread = (HANDLE) _beginthreadex(
         NULL,
         0,
         &thread,
-        &hwnd,
+        hwnd, // just pass in as is
         0,
         NULL
     );
@@ -340,14 +649,17 @@ void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     CloseHandle(hThread); // dereference the thread, itll keep running in the backgrund
 
     // looad images
-    LPWSTR *files;
+    LPCWSTR *files;
     DWORD nfiles = getAllChildren(bitmapsdir, &files);
     for (int i = 0; i < (int) nfiles; i++) {
-        loadimage(files[i]);
+        loadimage(files[i], 0);
     }
+
+    printmemimages();
 }
 
 // this is where ALL events are sent to
+int gabuh = 0;
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_CREATE: OnCreate(hwnd, uMsg, wParam, lParam); break; // when the window is messaged to be made.
@@ -358,7 +670,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         // this is callled if the window is QUITTING from any reason (X button, alt F4, task manager, etc.)
         // DestroyWindow() sends the WM_DESTROY message.
         case WM_DESTROY: 
-            printf("STOP\n");
+            debug("STOP");
             THREAD_RUNNING = 0;
             PostQuitMessage(0); // this POSTS a msg of WM_QUIT, causing the message loop to end 
             break;
@@ -378,21 +690,55 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
+            
+            
 
-            // All painting occurs here, between BeginPaint and EndPaint.
+            // // All painting occurs here, between BeginPaint and EndPaint.
             HBRUSH black = CreateSolidBrush(RGB(0,0,0)); 
-            HBRUSH blue = CreateSolidBrush(RGB(0,0,255)); 
+            // HBRUSH blue = CreateSolidBrush(RGB(0,0,255)); 
 
-            // FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW-1));
+            // // FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW-1));
             FillRect(hdc, &ps.rcPaint, black);
 
-            SelectObject(hdc, blue);
-            // problem with this is, im pretty sure this uses the CPU to draw
-            // and also no antialiasing
-            Ellipse(hdc, MOUSE.x, MOUSE.y, MOUSE.x + 100, MOUSE.y + 100);
+            // SelectObject(hdc, blue);
+            // // problem with this is, im pretty sure this uses the CPU to draw
+            // // and also no antialiasing
+            // Ellipse(hdc, MOUSE.x, MOUSE.y, MOUSE.x + 100, MOUSE.y + 100);
 
             DeleteObject(black);
-            DeleteObject(blue);
+            // DeleteObject(blue);
+
+            // https://winprog.org/tutorial/bitmaps.html
+            if (IMAGES_LOADED > 0) {
+                // draw the sad.bmp
+                // printf("running\n");
+                HDC mem = CreateCompatibleDC(hdc);
+                ImageArray sadarr = MEM_IMAGES[gabuh];
+                // wprintf(L"NAME: %s\n", sadarr.name);
+                Image sadimage = *sadarr.image_pointer;
+                HBITMAP sadhbit = sadimage.hbitmap;
+                BITMAP sadbit = sadimage.bitmap;
+
+                HBITMAP old = SelectObject(mem, sadhbit);
+
+                if (old == NULL || old == HGDI_ERROR) {
+                    error("select obj failed");
+                }
+
+                BitBlt(
+                    hdc,            // Destination DC
+                    MOUSE.x, MOUSE.y,           // Destination X, Y coordinates
+                    sadbit.bmWidth,     // Width to draw
+                    sadbit.bmHeight,    // Height to draw
+                    mem,         // Source DC
+                    0, 0,           // Source X, Y coordinates
+                    SRCCOPY         // Raster operation (direct copy)
+                );
+
+
+                SelectObject(mem, old);
+                DeleteDC(mem);
+            }
 
             EndPaint(hwnd, &ps);
             break;
