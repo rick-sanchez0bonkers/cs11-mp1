@@ -36,7 +36,11 @@ Contains game logic
 #include <math.h>
 #include <signal.h> // for aborting
 #include <stdbool.h> // for true or false because 1 or 0 SUCKS
-#include <ncurses.h> // figuring out how to fuckign compile this shit on windows took fucking an HOUR
+#ifndef _WIN32
+    #include <ccurses.h>
+#else
+    #include <ncurses/ncurses.h> // figuring out how to fuckign compile this shit on windows took fucking an HOUR
+#endif
 
 // hardcoded settings
 #define SIZE        15
@@ -61,7 +65,7 @@ Contains game logic
 
 // DEBUGGING
 // The wacky thingies are ANSI codes.
-#define DEBUG_MODE 1 // change to 0 to disable debug printss
+#define DEBUG_MODE 0 // change to 0 to disable debug printss
 
 // macros for things
 #define print(fmt, ...) printw(fmt, ##__VA_ARGS__); refresh()
@@ -539,6 +543,7 @@ void MAIN_MENU() {
             PROMPT_SETTINGS();
             return;
         case '2': // placeholder for instructions
+            PROMPT_SETTINGS();
             break;
         case '3':
             error("force exit");
@@ -660,6 +665,7 @@ int main() {
     raw();
     noecho();
     flushinp();
+    resize_term(200,200); // so that everything fits
     
     while (RETURN_TO_MENU) {
         MAIN_MENU();
