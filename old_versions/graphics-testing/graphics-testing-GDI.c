@@ -20,7 +20,7 @@
 //   its so different from working in a regular thing
 
 // this is literally just learning a whole new ass way to code
-// graphics is done using Direct2D
+// graphics is done using Windows GDI
 
 /*
 Very imporant things:
@@ -28,11 +28,19 @@ Very imporant things:
 this flag is needed for the compiler to link
 the graphics functionality (for drawing with
 hbrushes and whatever)
-
+-lmsimg32
+this flag is needed for the compiler to link
+with functionalities for some more
+graphics functionalities. i have no idea why
+theyre separated.
+the entire rendering uses TransparentBlt()
+which this library provides.
 
 full command (in powershell)
-gcc graphics-testing-GDI.c -lgdi32 -Wall -o graphics-testing-GDI.exe; ./graphics-testing-GDI.exe
+gcc graphics-testing-GDI.c -lgdi32 -lmsimg32 -Wall -o graphics-testing-GDI.exe; ./graphics-testing-GDI.exe
                                                                     ^ runs the .exe immediately
+-ldgdi32 is windows Graphics Device Interface for rendering images (like drawing ellipses or most crucially BitBlt)
+-lmsimg32 is some windows library for manipulating HBITMAPS, adds TransparentBlt which allows keying out a specific color for transparency
 
 */
 
@@ -42,8 +50,10 @@ gcc graphics-testing-GDI.c -lgdi32 -Wall -o graphics-testing-GDI.exe; ./graphics
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h> // variadic functions support
 #include <windows.h>
 #include <process.h>
+#include <math.h>
 #include <wchar.h> // https://en.cppreference.com/c/header/wchar for wide strings since file paths r wchar_t :(
 #include <signal.h> // for aborting
 
@@ -52,6 +62,9 @@ gcc graphics-testing-GDI.c -lgdi32 -Wall -o graphics-testing-GDI.exe; ./graphics
 #define FRAME_RATE 60
 #define DEBUG_MODE 1
 #define CONFIGSIZE 1024*2
+#define COLOR_KEY RGB(255,0,255) // this specific color is drawn as completely transparent.
+
+#define wstringify(x) L#x
 
 #define debug(fmt, ...) if (DEBUG_MODE) printf("\033[34m[%s:%d]\033[0m : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
 #define wdebug(fmt, ...) if (DEBUG_MODE) wprintf(L"\033[34m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__) // omitting file name cuz no idea how to convert it to wchar_t*
@@ -59,22 +72,20 @@ gcc graphics-testing-GDI.c -lgdi32 -Wall -o graphics-testing-GDI.exe; ./graphics
 #define error(fmt, ...) printf("\033[41m[%s:%d]\033[0m : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); raise(SIGABRT)
 #define print(fmt, ...) printf(fmt "\n", ##__VA_ARGS__)
 #define wprint(fmt, ...) wprintf(fmt L"\n", ##__VA_ARGS__)
+
 // adds error checking
 #define safemalloc(pointer, size) \
     pointer = malloc(size); \
     if (pointer == NULL) { \
         error("Malloc failed to allocate memory"); \
     }
+
 #define saferealloc(pointer, size) \
     pointer = realloc(pointer, size); \
     if (pointer == NULL) { \
         error("Realloc failed to allocate memory"); \
     }
     // debug("Successful realloc. Pointer address: %p, number of bytes: %d", pointer, (int) (size));
-
-// free the the htings that getAllChildren()
-// rely on
-#define freearraypointer(array) 
 
 // some types to make my life easier
 // -- TYPES -- //
@@ -102,18 +113,26 @@ typedef struct {
     int frames; // number of images
     int framecount; // how much frames have elapsed?
     int framerate; // how much frames to wait before the next frame gets swapped
-    int currframe; // what image are we on
+    int currframe; // what image are we on. starts at 0
     int loop; // if it loops or not. boolean int
     int enabled; // if it renders or not. boolean int
     double opacity; // 255 (opaque) to 0 (transparent)
     double rotation; // in degrees
     Vector2 position; // where on the screen to render
+    Vector2 size; // what size to render the image?
     LPCWSTR name; // the file name. if its an animation, gets the name of the first file and removes the number at the end (e.g. sad0.bmp -> sad)
     Image *image_pointer; // pointer to the array that contains the loaded images [one or more].
 } ImageArray;
 
 // global vars
-ImageArray* MEM_IMAGES;
+long long unsigned int FRAME_LIFETIME = 0; // counts the number of frames the game has been thru
+ImageArray* MEM_IMAGES; // this stores ALL of the loaded images. NOT SORTED BY LAYER
+// this is essentially an array of pointers pointing to things in MEM_IMAGES
+// and actually orders the pointers by layer.
+// loadimage() returns the address where an ImageArray is stored inside MEM_IMAGES
+// so sorting MEM_IMAGES will completely jumble all variables that rely on loadimage()
+// hence we need a new array to order them for the renderer to draw in proper order
+ImageArray* ORDERED_IMAGES[];
 size_t IMAGES_LOADED = 0;
 LPCWSTR bitmapsdir = L"bmp";
 LPCWSTR c_filedir = L"graphics-testing-GDI.c";
@@ -130,6 +149,7 @@ Vector2 MOUSE = {.x = 0, .y = 0};
 // in a consistent interval
 // not the best way to implement this because
 // the update lags behind, but whatever. good enough
+ImageArray *animdata = NULL;
 unsigned __stdcall thread(void *args) {
     HWND hwnd = (HWND) args; // retrieve the hwnd parm
     debug("Thread running");
@@ -141,6 +161,14 @@ unsigned __stdcall thread(void *args) {
     }
 
     while (THREAD_RUNNING) {
+        FRAME_LIFETIME++;
+        if (animdata != NULL) {
+            Vector2 newpos = {.x = 250, .y = 250};
+            newpos.x += 50 * sin(FRAME_LIFETIME/3.1415926 * 0.5);
+            newpos.y += 50 * cos(FRAME_LIFETIME/3.1415926 * 0.5);
+            animdata->position = newpos;
+        }
+
         if (THREAD_ENABLED) 
             PostMessage(hwnd, WM_PAINT, 0, 0);
         Sleep(max(1000/FRAME_RATE, 1));
@@ -184,12 +212,13 @@ ImageArray newImageArray() {
         .frames = 1,
         .framecount = -1, // ignored if only 1 frame
         .framerate = -1, // ignored if only 1 frame
-        .currframe = 1,
+        .currframe = 0, // starts at 0 up until frames-1
         .loop = 0,
         .enabled = 1,
         .opacity = 255.0,
         .rotation = 0.0,
         .position = (Vector2) {.x = 0, .y = 0}, // dont got a function for this yet
+        .size = (Vector2) {.x = 0, .y = 0}, // dont got a function for this yet
         // .name                omitted
         // .image_pointer       omitted
     };
@@ -206,6 +235,7 @@ void printmemimages() {
         print("\tFRAMES: %d", data.frames);
         print("\tFRAMECOUNT: %d", data.framecount);
         print("\tFRAMERATE: %d", data.framerate);
+        print("\tCURRFRAME: %d", data.currframe);
         print("\tLOOP: %d", data.loop);
         print("\tENABLED: %d", data.enabled);
         print("\tOPACITY: %f", data.opacity);
@@ -238,6 +268,38 @@ int isPath(LPCWSTR path) {
 int isFile(LPCWSTR path) {
     DWORD attributes = GetFileAttributes(path);
     return (attributes != INVALID_FILE_ATTRIBUTES && (0 == (attributes & FILE_ATTRIBUTE_DIRECTORY))); // actually exists and is a file
+}
+
+LPCWSTR concatPaths(int count, ...) {
+    // setting as null makes wcslen freak out 
+    // so we premalloc it
+    LPWSTR concatenated = NULL; 
+    safemalloc(concatenated, 1 * sizeof(WCHAR));
+    concatenated[0] = '\0';
+    va_list args;
+    va_start(args, count);
+    debug("Got %d args", count);
+    for (int i = 0; i < count; i++) {
+        LPWSTR wstr = va_arg(args, LPWSTR);
+        wdebug(L"Got string: %s",wstr);
+        wdebug(L"concat len: %d",wcslen(concatenated));
+        wdebug(L"str len: %d",wcslen(wstr));
+        wdebug(L"full len: %d", wcslen(concatenated) + 1 + wcslen(wstr) + 1);
+        saferealloc(concatenated, (wcslen(concatenated) + 1 + wcslen(wstr) + 1) * sizeof(WCHAR));
+        wdebug(L"reallocated");
+        // concated + \\ + wstr
+        // if concatenated alr has a \\ at the end
+        // or if wstr alr has a \\ at the start,
+        // then dont add a backslash
+        if (!(concatenated[wcslen(concatenated) - 1] == L'\\' || 
+            wstr[0] == L'\\') &&
+            wcslen(concatenated) > 0) // and str isnt empty
+            wcscat(concatenated, L"\\");
+        wcscat(concatenated, wstr);
+    }
+
+    va_end(args);
+    return (LPCWSTR) concatenated; 
 }
 
 /// @brief compare if the extension of a path matches the extension given
@@ -294,6 +356,13 @@ void trimExtension(LPCWSTR path, LPWSTR *modifying) {
             // copy everything before the dot.
             safemalloc(dest, (i) * sizeof(WCHAR));
             wcsncpy(dest, path, i);
+            wdebug(L"Path coped: %s", dest);
+            wdebug(L"char at index: %c", path[i]);
+            // for some reason, passing in image_or_folder_name (the heap copy) completely fucks wcsncpy up.
+            // even though path[i] correctly points to a '.'
+            // but adding this does fix it
+            // though i think the mallocated space is too much 
+            dest[i] = L'\0';
             break;
         }
         if (path[i] == L'\\') { // if we went thru the entire file name
@@ -556,6 +625,12 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     // imageN.bmp
     // .config -> contains framerate and other stuff (if im gonna add any other stuff)
 
+    // create a copy of image_or_folder_name
+    LPWSTR copy = NULL;
+    safemalloc(copy, (wcslen(image_or_folder_name) + 1) * sizeof(WCHAR));
+    wcscpy(copy, image_or_folder_name);
+    image_or_folder_name = copy;
+
     wdebug(L"given thing to load: %s", image_or_folder_name);
     wdebug(L"is file? %d", isFile(image_or_folder_name));
     wdebug(L"is path? %d", isPath(image_or_folder_name));
@@ -591,7 +666,7 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     } else if (!isBMP && !isFile(image_or_folder_name)) { // not a bmp and is a folder
         debug("loading as animation");
         // looad images
-        // LPCWSTR *files;
+        imagedat.framecount = 0;
         nfiles = getAllChildren(image_or_folder_name, &files);
         
         // make sure everything is valid
@@ -681,6 +756,7 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     }
 
     imagedat.image_pointer = images;
+    imagedat.size = (Vector2) {.x = images->bitmap.bmWidth, .y = images->bitmap.bmHeight};
 
     // p.s. this doesnt sort the array by layer yet :(
     saferealloc(MEM_IMAGES, (IMAGES_LOADED + 1) * sizeof(ImageArray));
@@ -691,11 +767,24 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     return &MEM_IMAGES[IMAGES_LOADED++];
 }
 
-
-
+/// @brief things that happen when the window is messaged to open
 void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    debug("CREATE");
-    
+    // debug("CREATE");
+    // looad images
+    // LPCWSTR *files;
+    // DWORD nfiles = getAllChildren(bitmapsdir, &files);
+    // for (int i = 0; i < (int) nfiles; i++) {
+    //     loadimage(files[i], 0);
+    // }
+    // freeFiles(files, nfiles); // clean up (safe since we make a heap copy of image_or_folder_name)
+
+    LPCWSTR anim = concatPaths(2, bitmapsdir, L"chomp");
+    wdebug(L"concatenated: %s", anim);
+    animdata = loadimage(anim, 0);
+    // animdata->position = (Vector2) {.x = 250, .y = 250};
+    animdata->size = (Vector2) {.x = 300, .y = 300};
+    printmemimages();
+
     // start the frame loop thread
     HANDLE hThread = (HANDLE) _beginthreadex(
         NULL,
@@ -711,24 +800,146 @@ void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     }
 
     CloseHandle(hThread); // dereference the thread, itll keep running in the backgrund
+}
 
-    // looad images
-    LPCWSTR *files;
-    DWORD nfiles = getAllChildren(bitmapsdir, &files);
-    for (int i = 0; i < (int) nfiles; i++) {
-        loadimage(files[i], 0);
+/// @brief painting on the window
+/// credit: http://parallel.vub.ac.be/education/modula2/technology/Win32_tutorial/bitmaps.html
+void OnPaint(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    // printf("painting, %d, %d\n", MOUSE.x, MOUSE.y);
+    InvalidateRect(hwnd, NULL, 0); // forces windows to include the entire window as the rcPaint param instead of only the area needing updating.
+
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+
+    // // All painting occurs here, between BeginPaint and EndPaint.
+    HBRUSH black = CreateSolidBrush(RGB(0,0,0)); 
+    // HBRUSH blue = CreateSolidBrush(RGB(0,0,255)); 
+
+    // // FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW-1));
+    FillRect(hdc, &ps.rcPaint, black);
+
+    // SelectObject(hdc, blue);
+    // // problem with this is, im pretty sure this uses the CPU to draw
+    // // and also no antialiasing
+    // Ellipse(hdc, MOUSE.x, MOUSE.y, MOUSE.x + 100, MOUSE.y + 100);
+
+    DeleteObject(black);
+    // DeleteObject(blue);
+
+    // https://winprog.org/tutorial/bitmaps.html
+    if (IMAGES_LOADED > 0) {
+        HDC mem = CreateCompatibleDC(hdc);
+        HBITMAP old = NULL;
+
+        for (int i = 0; i<IMAGES_LOADED; i++) {
+            ImageArray *imagedat = &MEM_IMAGES[i]; // not getting as a pointer only gives us a shallow copy :/
+            if (!imagedat->enabled) continue; // skip all disabled frames
+            
+            // update currframe
+            if (imagedat->framecount >= imagedat->framerate) {
+                imagedat->framecount = 0;
+
+
+                imagedat->currframe++;
+                
+                // if ((imagedat->currframe == imagedat->frames - 1) && !imagedat->loop) { // if it dont loop
+                //     imagedat->framecount = -1;
+                // } else {
+                //     imagedat->currframe = imagedat->currframe % imagedat->frames;
+                // }
+                imagedat->currframe = imagedat->currframe % imagedat->frames;
+            }
+            
+            // increment frame counter for animations
+            if (imagedat->framecount > -1) {
+                imagedat->framecount++;
+            }
+            
+            // debug("Framecount: %d, frames: %d, currframe: %d", imagedat->framecount, imagedat->frames, imagedat->currframe);
+            
+            Image imageframe = *(imagedat->image_pointer + imagedat->currframe);
+                HBITMAP hbitmap = imageframe.hbitmap;
+                BITMAP bitmap = imageframe.bitmap;
+
+                HBITMAP status;
+                if (old == NULL) {
+                    old = SelectObject(mem, hbitmap);
+                    status = old;
+                } else {
+                    status = SelectObject(mem, hbitmap);
+                }
+
+                if (status == NULL || status == HGDI_ERROR) {
+                    error("select obj failed");
+                }
+
+                //https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-transparentblt
+                // this requires the flag -lmsimg32
+                // BitBlt(//
+                TransparentBlt(
+                    hdc,            // Destination DC
+                    imagedat->position.x, imagedat->position.y,           // Destination X, Y coordinates
+                    imagedat->size.x,     // Width to draw
+                    imagedat->size.y,    // Height to draw
+                    mem,         // Source DC
+                    0, 0,           // Source X, Y coordinates
+                    bitmap.bmWidth, bitmap.bmHeight, // source rect
+                    COLOR_KEY // the color to key out
+                );
+
+            // wprintf(L"NAME: %s\n", sadarr.name);
+            // Image image = *imagedat.image_pointer;
+            // HBITMAP sadhbit = sadimage.hbitmap;
+            // BITMAP sadbit = sadimage.bitmap;
+
+            // old = SelectObject(mem, sadhbit);
+
+            // if (old == NULL || old == HGDI_ERROR) {
+            //     error("select obj failed");
+            // }
+
+            // BitBlt(
+            //     hdc,            // Destination DC
+            //     MOUSE.x, MOUSE.y,           // Destination X, Y coordinates
+            //     sadbit.bmWidth,     // Width to draw
+            //     sadbit.bmHeight,    // Height to draw
+            //     mem,         // Source DC
+            //     0, 0,           // Source X, Y coordinates
+            //     SRCCOPY         // Raster operation (direct copy)
+            // );
+        }
+
+
+        SelectObject(mem, old);
+        DeleteDC(mem);
     }
 
-    // do absolutely not clean up
-    // loaded images use addresses from
-    // the given files.
-    // freeFiles(files, nfiles); // clean up
+    EndPaint(hwnd, &ps);
+}
 
-    printmemimages();
+void OnDestroy(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    debug("STOP");
+    THREAD_RUNNING = 0;
+    // clean up the entire MEM_IMAGES array
+    for (int i = 0; i<IMAGES_LOADED; i++) {
+        ImageArray imagedat = MEM_IMAGES[i];
+        wdebug(L"Freeing image %s", imagedat.name);
+
+        for (int j = 0; j<imagedat.frames; j++) { // for each image loaded, delete HBITMAP
+            Image image = *(imagedat.image_pointer + j);
+            DeleteObject(image.hbitmap);
+        }
+
+        // free up mallocated things
+        free(imagedat.name);
+        free(imagedat.image_pointer);
+    }
+
+
+    PostQuitMessage(0); // this POSTS a msg of WM_QUIT, causing the message loop to end 
 }
 
 // this is where ALL events are sent to
-int gabuh = 0;
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_CREATE: OnCreate(hwnd, uMsg, wParam, lParam); break; // when the window is messaged to be made.
@@ -739,9 +950,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         // this is callled if the window is QUITTING from any reason (X button, alt F4, task manager, etc.)
         // DestroyWindow() sends the WM_DESTROY message.
         case WM_DESTROY: 
-            debug("STOP");
-            THREAD_RUNNING = 0;
-            PostQuitMessage(0); // this POSTS a msg of WM_QUIT, causing the message loop to end 
+            OnDestroy(hwnd, uMsg, wParam, lParam);
             break;
             // WM_CLOSE is another thing where you can
             // override the closing action (like pressing X)
@@ -754,62 +963,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         
         // needs -lgdi32 flag to function
         case WM_PAINT:; // p.s. you CANNOT immediately declare after a case statement. adding an empty statement (just a semicolon) fixes it
-            // printf("painting, %d, %d\n", MOUSE.x, MOUSE.y);
-            InvalidateRect(hwnd, NULL, 0); // forces windows to include the entire window as the rcPaint param instead of only the area needing updating.
-
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            
-            
-
-            // // All painting occurs here, between BeginPaint and EndPaint.
-            HBRUSH black = CreateSolidBrush(RGB(0,0,0)); 
-            // HBRUSH blue = CreateSolidBrush(RGB(0,0,255)); 
-
-            // // FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW-1));
-            FillRect(hdc, &ps.rcPaint, black);
-
-            // SelectObject(hdc, blue);
-            // // problem with this is, im pretty sure this uses the CPU to draw
-            // // and also no antialiasing
-            // Ellipse(hdc, MOUSE.x, MOUSE.y, MOUSE.x + 100, MOUSE.y + 100);
-
-            DeleteObject(black);
-            // DeleteObject(blue);
-
-            // https://winprog.org/tutorial/bitmaps.html
-            if (IMAGES_LOADED > 0) {
-                // draw the sad.bmp
-                // printf("running\n");
-                HDC mem = CreateCompatibleDC(hdc);
-                ImageArray sadarr = MEM_IMAGES[gabuh];
-                // wprintf(L"NAME: %s\n", sadarr.name);
-                Image sadimage = *sadarr.image_pointer;
-                HBITMAP sadhbit = sadimage.hbitmap;
-                BITMAP sadbit = sadimage.bitmap;
-
-                HBITMAP old = SelectObject(mem, sadhbit);
-
-                if (old == NULL || old == HGDI_ERROR) {
-                    error("select obj failed");
-                }
-
-                BitBlt(
-                    hdc,            // Destination DC
-                    MOUSE.x, MOUSE.y,           // Destination X, Y coordinates
-                    sadbit.bmWidth,     // Width to draw
-                    sadbit.bmHeight,    // Height to draw
-                    mem,         // Source DC
-                    0, 0,           // Source X, Y coordinates
-                    SRCCOPY         // Raster operation (direct copy)
-                );
-
-
-                SelectObject(mem, old);
-                DeleteDC(mem);
-            }
-
-            EndPaint(hwnd, &ps);
+            OnPaint(hwnd, uMsg, wParam, lParam);
             break;
         case WM_MOUSEMOVE:; // mousemovenent
             MOUSE.y = (int) HIWORD(lParam); // u just gotta read docs to figure these out bruh...
@@ -858,16 +1012,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         error("EXECUTABLE FILE NOT IN THE SAME DIRECTORY AS bmp FOLDER. \nTHE EXECUTABLE FILE HAS TO BE IN THE CS11 MP1 FOLDER TO PROPERLY FUNCTION.");
     }
     debug("Verified required files\n");
-
-    // testing getAllChildren
-    // LPCWSTR fundir = L"..\\.."; 
-    // LPWSTR *files = NULL;
-    // DWORD number_of_files = getAllChildren(fundir, &files);
-    // debug("files %p", files);
-    // for (int i=0; i<number_of_files; i++) {
-    //     LPWSTR file = files[i];
-    //     wdebug("%s", file);
-    // }
 
     // widnow class
     // L prefix makes it a wide char (uses more than 1 byte per char)
