@@ -1,9 +1,10 @@
+/*   -   -   -   -   -   -   -   -   -   -   -   -   */
 /*      BS COMPUTER SCIENCE PROJECT -- SNAKE GAME    */
 /*      THIS IS A GRAPHICS IMPLEMENTATION OF THE     */
 /*      SNAKE GAME USING <windows.h>.                */
 /*      ONLY WINDOWS COMPATIBLE                      */
-/*
--------------------------------------------------------
+/*   -   -   -   -   -   -   -   -   -   -   -   -   */
+/*-------------------------------------------------------
 Authors:
     *omitted on github*
 
@@ -56,43 +57,7 @@ Credits to very useful resources used throughout the project:
     https://stackoverflow.com/questions/3828835/how-can-we-check-if-a-file-exists-or-not-using-win32-program
     https://stackoverflow.com/questions/68215054/browse-a-whole-folder-in-c
     https://stackoverflow.com/questions/1541492/how-to-code-for-reducing-flicker-need-your-help-with-code-win32-vc-flicker
--------------------------------------------------------
-
-*/
-
-// file to mess around with making 
-// graphics.
-// since <graphics.h> is literally nonexistent for me
-// im using <windows.h> instead and doing it raw :(
-// following: https://learn.microsoft.com/en-us/windows/win32/learnwin32/creating-a-window
-//          ^^ this is in C++ so it has different syntax but its close enough
-//   this is pretty much boilerplate for <windows.h>
-//   its so different from working in a regular thing
-
-// this is literally just learning a whole new ass way to code
-// graphics is done using Windows GDI
-
-/*
-Very imporant things:
--lgdi32
-this flag is needed for the compiler to link
-the graphics functionality (for drawing with
-hbrushes and whatever)
--lmsimg32
-this flag is needed for the compiler to link
-with functionalities for some more
-graphics functionalities. i have no idea why
-theyre separated.
-the entire rendering uses TransparentBlt()
-which this library provides.
-
-full command (in powershell)
-gcc graphics-testing-GDI.c -lgdi32 -lmsimg32 -Wall -o graphics-testing-GDI.exe; ./graphics-testing-GDI.exe
-                                                                    ^ runs the .exe immediately
--ldgdi32 is windows Graphics Device Interface for rendering images (like drawing ellipses or most crucially BitBlt)
--lmsimg32 is some windows library for manipulating HBITMAPS, adds TransparentBlt which allows keying out a specific color for transparency
-
-*/
+-------------------------------------------------------*/
 
 // adds support for unicode characters. Adds the L prefix for strings which can specify wide character type.
 #ifndef UNICODE
@@ -115,8 +80,23 @@ gcc graphics-testing-GDI.c -lgdi32 -lmsimg32 -Wall -o graphics-testing-GDI.exe; 
 #define COLOR_KEY RGB(255,0,255) // this specific color is drawn as completely transparent.
 #define WINDOWWIDTH 750          // window width
 #define WINDOWHEIGHT 750         // window height
+
 #define BMPPATH     L"bmp"
 #define SOURCEPATH  L"CS11 MP1_BANGSI-IL_DUQUE_SANTOS.c"
+
+// file paths for images used in the game
+// no .bmp = animation folder
+// has .bmp = image
+#define TILEFULLPATH concatPaths(2, BMPPATH, L"tilefull")
+#define TILEHOLLOWPATH concatPaths(2, BMPPATH, L"tilehollow")
+#define WALLPATH concatPaths(2, BMPPATH, L"wall.bmp")
+#define FOODPATH concatPaths(2, BMPPATH, L"apple.bmp")
+
+// each cardinal direction
+#define SNAKEHEADPATH concatPaths(2, BMPPATH, L"snakehead.bmp")
+#define SNAKEBODYPATH
+#define SNAKETAIPATH
+
 //
 
 // SNAKE GAME CONSTANTS
@@ -139,12 +119,15 @@ gcc graphics-testing-GDI.c -lgdi32 -lmsimg32 -Wall -o graphics-testing-GDI.exe; 
 #define WALL        '#' // this makes up the border.
 //
 
+#define wstringify(x) L## #x
+
 // macros for printing
 #define debug(fmt, ...) if (DEBUG_MODE) printf("\033[34m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__)      // prints blue, DEBUG_MODE only
 #define wdebug(fmt, ...) if (DEBUG_MODE) wprintf(L"\033[34m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__)   // WCHAR support
 #define warn(fmt, ...) printf("\033[43m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__)                       // prints yellow
 #define wwarn(fmt, ...) wprintf(L"\033[43m[%d]\033[0m : " fmt "\n", __LINE__, ##__VA_ARGS__)                    // WCHAR support
-#define error(fmt, ...) printf("\033[41m[%s:%d]\033[0m : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); raise(SIGABRT)      // for raising exceptions. no wchar support
+#define error(fmt, ...) printf("\033[41m[%s:%d]\033[0m : " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); raise(SIGABRT)      // for raising exceptions
+#define werror(fmt, ...) wprintf(L"\033[41m[%s:%d]\033[0m : " fmt "\n", wstringify(__FILE__), __LINE__, ##__VA_ARGS__); raise(SIGABRT)      // WCHAR support
 #define print(fmt, ...) printf(fmt "\n", ##__VA_ARGS__)                                                         // included \\n
 #define wprint(fmt, ...) wprintf(fmt L"\n", ##__VA_ARGS__)                                                      // WCHAR support
 
@@ -194,11 +177,18 @@ typedef struct {
     double rotation; // in degrees                      UNSUPPORTED
     Vector2 position; // where on the screen to render
     Vector2 size; // what size to render the image?
-    LPCWSTR name; // the file name. if its an animation, gets the name of the folder
+    LPWSTR name; // the file name. if its an animation, gets the name of the folder
     Image *image_pointer; // pointer to the array that contains the loaded images [one or more].
 } ImageArray;
 
-// global vars
+// -- CONSTANTS -- //
+const Vector2 UP = {.x = 0, .y = -1};
+const Vector2 DOWN = {.x = 0, .y = 1};
+const Vector2 LEFT = {.x = -1, .y = 0};
+const Vector2 RIGHT = {.x = 1, .y = 0};
+
+// -- GLOBAL VARS -- //
+// GRAPHICS
 long long unsigned int FRAME_LIFETIME = 0; // counts the number of frames the game has been thru
 ImageArray** MEM_IMAGES; // this stores ALL of the loaded image's pointers.
 size_t IMAGES_LOADED = 0;
@@ -208,10 +198,76 @@ int THREAD_RUNNING = 1; // set to 0 to kill the thread
 int THREAD_ENABLED = 1; // set to 0 to disable the thread without killing it
 Vector2 MOUSE = {.x = 0, .y = 0};
 
-// -- GAME OBJECTS -- // 
-// 15x15
-ImageArray* SNAKEGAME_TILES[SIZE*SIZE]; // contains the tiles
+// GAME SETTINGS 
+int DIFFICULTY = EASY;
+int NUM_OF_FOOD = MAX_FOOD;
+int NUM_OF_BLOCK = MAX_BLOCKS;
 
+// GAME STATES
+int GAME_OVER = 1;      // snake game isnt running
+int RETURN_TO_MENU = 1; // if 
+int SCORE = 0;          // in game score
+
+// -- GAME OBJECTS -- // 
+ImageArray* SNAKEGAME_BACKGROUND[SIZE][SIZE]; // contains the tile images.
+ImageArray* SNAKEGAME_FOREGROUND[SIZE][SIZE]; // contains anything thats drawn above the tiles.
+
+// -- ARRAYS -- //
+// diff implementation from the consoleonly version
+// since i have to keep track of objects properly
+// or else we go to silent crashes purgatory
+
+// the snake's body
+Vector2 SNAKE_ARR[SIZE*SIZE];
+int SNAKE_ARR_LEN = 0;
+
+// playable area with their specific objects
+char AREA[SIZE][SIZE]; 
+// this is a front buffer, what is actually being rendered.
+// only deletes and loads the images that actually changed
+// in the AREA
+char AREADISPLAYED[SIZE][SIZE];
+
+// ------- VECTOR2 FUNCTIONS ------- //
+
+// returns a vector2 with these specific properties
+Vector2 v2(int x, int y) {
+    return (Vector2) {.x = x, .y = y};
+}
+
+// prints an Vector2
+void printv2(Vector2 v2) {
+    print("(%d, %d)", v2.x, v2.y);
+}
+
+/// @brief Adds two vectors together
+/// @param vec1 
+/// @param vec2 
+/// @return added v2
+Vector2 v2add(Vector2 vec1, Vector2 vec2) {
+    return v2(vec1.x + vec2.x, vec1.y + vec2.y);
+}
+
+/// @brief check if two vectors have the exact same components
+/// @param v1 
+/// @param v2 
+/// @return boolean int
+int v2equality(Vector2 v1, Vector2 v2) {
+    return (v1.x == v2.x && v1.y == v2.y);
+}
+
+/// @brief generates a random coordinate with bounds
+// (dont forget to initialize srand())
+/// @param x_min 
+/// @param x_max 
+/// @param y_min 
+/// @param y_max 
+/// @return rand vec2
+Vector2 v2rand(int x_min, int x_max, int y_min, int y_max) {
+    return v2((rand() % (x_max-x_min + 1)) + x_min, (rand() % (y_max-y_min + 1)) + y_min);
+}
+
+// ------- FRAME LOOP FUNCTION ------- //
 
 // a seperate thread that acts as the
 // frame rate by repeatedly calling WM_PAINT
@@ -239,9 +295,9 @@ unsigned __stdcall thread(void *args) {
     return 0;
 }
 
-// ------- HELPER FUNCTIONS ------- //
+// ------- GRAPHICS HELPER FUNCTIONS ------- //
 
-// frees the filearray u get from getAllChildren
+/// @brief frees the filearray u get from getAllChildren
 void freeFiles(LPCWSTR* files, DWORD nfiles) {
     for (int i = 0; i<nfiles; i++) {
         free((void *) files[i]);
@@ -263,8 +319,8 @@ ImageArray newImageArray() {
         .enabled = 1,
         .opacity = 255.0,
         .rotation = 0.0,
-        .position = (Vector2) {.x = 0, .y = 0}, // dont got a function for this yet
-        .size = (Vector2) {.x = 0, .y = 0}, // dont got a function for this yet
+        .position = v2(0,0), // dont got a function for this yet
+        .size = v2(0,0), // dont got a function for this yet
         // .name                omitted
         // .image_pointer       omitted
     };
@@ -308,7 +364,7 @@ void printmemimages() {
 /// @brief inserts the pointer of an imagearray to the ordered_images arr based on the layer
 /// @param ptrImageDat ptr to the imagearray
 void insertToDraw(ImageArray* ptrImageDat) {
-    wdebug(L"Got pointer %p [%s]", ptrImageDat, ptrImageDat->name);
+    // wdebug(L"Got pointer %p [%s]", ptrImageDat, ptrImageDat->name);
     double layer = ptrImageDat->layer;
     int indextoinsert = IMAGES_LOADED;
 
@@ -333,26 +389,202 @@ void insertToDraw(ImageArray* ptrImageDat) {
         MEM_IMAGES[i] = MEM_IMAGES[i - 1];
     }
     MEM_IMAGES[indextoinsert] = ptrImageDat;
-    wdebug(L"Inserted %s to %d.", ptrImageDat->name, indextoinsert);
+    // wdebug(L"Inserted %s to %d.", ptrImageDat->name, indextoinsert);
 }
 
+/// @brief only prints the pointer and the filename. not any imagearray info
 void printdraworder() {
     debug("Full list:");
     for (int i = 0; i<IMAGES_LOADED; i++) {
         ImageArray* dat = MEM_IMAGES[i];
+        if (dat == NULL) {warn("index %d was deleted yet hasnt been popped.", i); continue;}
         wdebug(L"PTR %p [%s : %.2lf]", dat, dat->name, dat->layer);
+    }
+    debug("Loaded images: %d", IMAGES_LOADED);
+}
+
+/// @brief finds the first match of ptrImageDat in MEM_IMAGES
+/// @param ptrImageDat 
+/// @return index, -1 if none found.
+int getIndexInDraw(ImageArray* ptrImageDat) {
+    for (int i = 0; i<IMAGES_LOADED; i++) {
+        ImageArray* dat = MEM_IMAGES[i];
+        if (dat == ptrImageDat) return i;
+    }
+    return -1;
+}
+
+/// @brief pops an element at index in MEM_IMAGES.
+// shifts all elements, maintains order.
+/// @param index index to pop
+void popInDraw(int index) {
+    IMAGES_LOADED--;
+    for (int i = index; i < IMAGES_LOADED; i++) {
+        MEM_IMAGES[i] = *(MEM_IMAGES + i+1); // moves x
+    }
+    MEM_IMAGES[IMAGES_LOADED] = NULL; // just in case
+}
+
+
+/// @brief completely frees an ImageArray from memory
+/// @param ptrImageArray 
+void freeImageArray(ImageArray* ptrImageArray) {
+    int index = getIndexInDraw(ptrImageArray);
+    if (index < 0) {
+        return;
+    }
+    ImageArray* fromIndex = MEM_IMAGES[index];
+    if (fromIndex != ptrImageArray) {
+        werror(L"Mismatching pointer given to free [%p] and actually found [%p]", ptrImageArray, fromIndex);
+    }
+    // wdebug(L"Freeing image %p [%s]", ptrImageArray, ptrImageArray->name);
+    MEM_IMAGES[index] = NULL; // mark as being deleted, so WM_PAINT doesnt accidentally try to draw garbage data
+    for (int j = 0; j<ptrImageArray->frames; j++) { // for each image loaded, delete HBITMAP
+        Image image = *(ptrImageArray->image_pointer + j);
+        DeleteObject(image.hbitmap);
+    }
+    // free up mallocated things
+    free(ptrImageArray->name);
+    free(ptrImageArray->image_pointer);
+    free(ptrImageArray);
+
+    popInDraw(index);
+
+}
+
+// ------- SNAKE GAME HELPER FUNCTIONS ------- //
+
+/// @brief gets the point in the area
+/// @param position pos
+/// @return shallow copy i think
+char getareapoint(Vector2 position) {
+    return AREA[position.y][position.x];
+}
+
+/// @brief places an obj to in AREA. only places if its within bounds.
+/// @param position 
+/// @param obj 
+void placeareapoint(Vector2 position, char obj) {
+    if (position.x > -1 && position.y > -1 &&
+        position.x < SIZE && position.y < SIZE
+    ) {
+        AREA[position.y][position.x] = obj;
     }
 }
 
-int getIndexInDraw(ImageArray* ptrImageDat) {
-    return 0;
+/// @brief checks if a specific point is in an vector2 array
+/// @param array 
+/// @param arr_len 
+/// @param point 
+/// @return index (if found), else -1.
+int ispointinarray(Vector2 array[], int arr_len, Vector2 point) {
+    // debug("arrlen: %d", arr_len);
+    for (int i=0; i<arr_len; i++) {
+        Vector2 value = *(array + i); // advance pointer by i. pointers are hella weird
+        // printv2(value); printv2(point), printf(" %d <", v2equality(value, point)); printf("\n");
+        if (v2equality(value, point)) {
+            return i;
+        }
+    }  
+    return -1;
 }
 
-void popInDraw(ImageArray* ptrImageDat) {
-
+/// @brief pops an element at index.
+// shifts all elements, maintains order.
+/// @param array 
+/// @param arr_len modified, pass it as an address
+/// @param index index to pop
+void popInVector2(Vector2 array[], int *arr_len, int index) {
+    *arr_len -= 1; // subtract the spot the element was occupying
+    for (int i = index; i < *arr_len; i++) {
+        array[i] = *(array + i+1); // moves x
+    }
 }
 
-// ------- FUNCTIONS FOR PATHS ------- //
+/// @brief gone
+void removeSnakeFromArea() {
+    // for every snake part in area currently,
+    // delete them. i dont feel like doing this
+    // the smart way
+    for (int i = 0; i<SNAKE_ARR_LEN; i++) {
+        Vector2 pos = SNAKE_ARR[i];
+        placeareapoint(pos, EMPTY);
+    }
+}
+
+/// @brief back
+void returnSnakeFromArea() {
+    // put them back lol
+    for (int i = 0; i<SNAKE_ARR_LEN; i++) {
+        Vector2 pos = SNAKE_ARR[i];
+        placeareapoint(pos, SNAKE);
+        // AREA[pos.y][pos.x] = SNAKE;
+    }
+}
+
+/// @brief adds a new snake part at pos. takes care of putting it in the area.
+/// @param position 
+void newSnakePart(Vector2 position) {
+    // removeSnakeFromArea();
+    SNAKE_ARR[SNAKE_ARR_LEN] = position;
+    SNAKE_ARR_LEN++;
+    // returnSnakeFromArea();
+}
+
+/// @brief get direction from wasd input.
+/// @param input 
+/// @return vector2 direction, defaults to (0,0).
+Vector2 wasddirection(long long input) {
+    // translates the wasd to vector direction
+    // https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+    switch (input) {
+        case 'W': return UP;
+        case 'A': return LEFT;
+        case 'S': return DOWN;
+        case 'D': return RIGHT;
+    }
+
+    return v2(0,0);
+}
+
+/// @brief prints the area in the console.
+/// for debugging only.
+void printarea() {
+    if (!DEBUG_MODE) return;
+    for (int y=0; y<SIZE; y++) {
+        for (int x=0; x<SIZE; x++) {
+            // differentiating the snake's body from its head
+            if ((AREA[y][x] == SNAKE) && (SNAKE_ARR_LEN > 0)) { // its a snake, has a head
+                if (v2equality(SNAKE_ARR[0], v2(x,y))) { // if is the head
+                    printf("%c ", SNAKE);
+                } else printf("%c ", SNAKEBODY); // if it isnt
+                continue;
+            }
+            printf("%c ", AREA[y][x]);
+        }
+        printf("\n");
+    }
+}
+
+void generatefood(int amount) {
+    int attempts = 0;
+    while (amount > 0) {
+        if (attempts > 50) {
+            break;
+        }
+        Vector2 randpos = v2rand(1, 13, 1, 13);
+        if (getareapoint(randpos) == EMPTY) {
+            placeareapoint(randpos, FOOD);
+            // AREA[randpos.x][randpos.y] = FOOD;
+            // placeobject(FOOD, randpos);
+            // updatearea();
+            amount--; \
+            attempts = 0;
+        } else attempts++;
+    }
+}
+
+// ------- PATH FUNCTIONS ------- //
 // credit:
 // https://stackoverflow.com/questions/3828835/how-can-we-check-if-a-file-exists-or-not-using-win32-program
 
@@ -510,6 +742,7 @@ DWORD getFullPathLength(LPCWSTR dir) {
 }
 
 //https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfullpathnamew
+
 /// @brief returns the full path of a reltive path.
 /// @param dir LPCWSTR relative dir
 /// @return allocated var. dont forget to free().
@@ -661,7 +894,7 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     // imageN.bmp
     // .config -> contains framerate and other stuff
 
-    wdebug(L"given thing to load: %s", image_or_folder_name);
+    // wdebug(L"given thing to load: %s", image_or_folder_name);
 
     if (!isPath(image_or_folder_name)) {
         error("Malformed/Nonexistent path given.");
@@ -674,7 +907,7 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     trimPath(trimmedExtension, &trimmed);
     free(trimmedExtension);
 
-    wdebug(L"path trimmed: %s", trimmed);
+    // wdebug(L"path trimmed: %s", trimmed);
 
     // differentiating between images and animations
     ImageArray* imagedat = newHeapImageArray();
@@ -686,11 +919,11 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
     DWORD nfiles;
     DWORD nimages;
     if (isBMP) { // is a BMP
-        debug("loading as image");
+        // debug("loading as image");
         nfiles = 0;
         nimages = 1;
     } else if (!isBMP && !isFile(image_or_folder_name)) { // is an anim folder
-        debug("loading as animation");
+        // debug("loading as animation");
         
         imagedat->framecount = 0; // differentiates from bmp
         nfiles = getAllChildren(image_or_folder_name, &files);
@@ -719,7 +952,7 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
 
     // load in the images
     saferealloc(images, nimages * sizeof(Image));
-    debug("IMAGES TO LOAD:");
+    // debug("IMAGES TO LOAD:");
     for (int i = 0; i<nimages; i++) {
         LPCWSTR name = isBMP ? image_or_folder_name : NULL;
         if (name == NULL) { // its an animation
@@ -750,7 +983,7 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
             free(withProperOrder);
             free(indexWCHAR);
         }
-        wdebug(L"loading %s", name);
+        // wdebug(L"loading %s", name);
 
         // load the actual image to memory
         HBITMAP hBitmap = (HBITMAP)LoadImage(
@@ -766,16 +999,214 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
 
         images[i].hbitmap = hBitmap;
         images[i].bitmap = bitmap;
-        wdebug(L"successfully loaded %s", name);
+        // wdebug(L"successfully loaded %s", name);
     }
 
     imagedat->image_pointer = images;
-    imagedat->size = (Vector2) {.x = images->bitmap.bmWidth, .y = images->bitmap.bmHeight};
+    imagedat->size = v2(images->bitmap.bmWidth, images->bitmap.bmHeight);
 
     // sorts the images by layer
     insertToDraw(imagedat);
     if (files != NULL) freeFiles(files, nfiles);
+
+    // wdebug(L"successfully loaded %s", imagedat->name);
     return imagedat;
+}
+
+// ------- SNAKE GAME FUNCTIONS ------- //
+
+/// @brief fills some arrays with their default values
+void initarrays() {
+    for (int y=0; y<SIZE; y++) {
+        for (int x=0; x<SIZE; x++) {
+            AREA[y][x] = EMPTY;             // default: EMPTY
+            AREADISPLAYED[y][x] = -1;             // default: -1, different so it actually updates the first time
+            SNAKEGAME_BACKGROUND[y][x] = NULL;   // default: NULL
+            SNAKEGAME_FOREGROUND[y][x] = NULL;   // default: NULL
+        }
+    }
+}
+
+// /// @brief updates the SNAKEGAME_BACKGROUND with AREA things
+// /// TODO: implement this without just clearing everything and reloading from scratch
+// void updateareabackground() {
+//     debug("Updating BACKGROUND TILES");
+//     // wipes all the objects first then
+//     // loads all necessary images
+//     // TODO: change this, not very good
+//     int layer = 1;
+//     for (int y = 0; y<SIZE; y++) {
+//         for (int x = 0; x<SIZE; x++) {
+//             char areaobjchar = AREA[y][x];
+//             ImageArray* tile = SNAKEGAME_BACKGROUND[y][x];
+//             ImageArray* tileimg = NULL;
+//             if (tile != NULL) {      
+//                 freeImageArray(tile);
+//                 SNAKEGAME_BACKGROUND[y][x] = NULL;
+//                 // continue;
+//             }
+//             switch (areaobjchar) {
+//                 case WALL:
+//                     tileimg = loadimage(WALLPATH, layer);
+//                     SNAKEGAME_BACKGROUND[y][x] = tileimg;
+//                     break;
+//                 default: 
+//                 // case EMPTY:
+//                     tileimg = loadimage(((x+y)%2 == 0 ? TILEFULLPATH : TILEHOLLOWPATH), layer);
+//                     SNAKEGAME_BACKGROUND[y][x] = tileimg;
+//                     // break;
+//                     // continue;
+//             }
+//             if (tileimg == NULL) continue;
+//             // stanard pos and sizes
+//             // these r got from trial and error lolz
+//             tileimg->size = v2(30, 30);
+//             tileimg->position = v2(150 + x*30, 150 + y*30);
+//         }
+//     }
+// }
+
+// /// @brief updates the SNAKEGAME_FOREGROUND with AREA things
+// /// TODO: implement this without just clearing everything and reloading from scratch
+// void updateareaforeground() {
+//     debug("Updating FOREGROUND TILES");
+//     int layer = 2;
+//     for (int y = 0; y<SIZE; y++) {
+//         for (int x = 0; x<SIZE; x++) {
+//             char areaobjchar = AREA[y][x];
+//             ImageArray* tile = SNAKEGAME_FOREGROUND[y][x];
+//             ImageArray* tileimg = NULL;
+//             if (tile != NULL) {      
+//                 freeImageArray(tile);
+//                 SNAKEGAME_FOREGROUND[y][x] = NULL;
+//                 // continue;
+//             }
+//             switch (areaobjchar) {
+//                 case FOOD:
+//                     tileimg = loadimage(FOODPATH, layer);
+//                     SNAKEGAME_FOREGROUND[y][x] = tileimg;
+//                     break;
+//                 case SNAKE: // snake rendering
+//                     tileimg = loadimage(SNAKEHEADPATH, layer);
+//                     SNAKEGAME_FOREGROUND[y][x] = tileimg;
+//                     break;
+//                 default: 
+//                     // warn("Unsupported tile: %c", areaobjchar);
+//                     continue;
+//             }
+//             if (tileimg == NULL) continue;
+//             // stanard pos and sizes
+//             // these r got from trial and error lolz
+//             tileimg->size = v2(30, 30);
+//             tileimg->position = v2(150 + x*30, 150 + y*30);
+//         }
+//     }
+// }
+
+/// @brief actually updates the images from what changed in AREA instead of completely deleting
+/// and rebuilding bruh
+void updateDisplayedArea() {
+    for (int y = 0; y<SIZE; y++) {
+        for (int x = 0; x<SIZE; x++) {
+            char areaChar = AREA[y][x];
+            char displayedChar = AREADISPLAYED[y][x];
+            if (areaChar == displayedChar) {  // do nothing if its the same
+                // debug("SKIP (%d, %d)", x,y); 
+                continue;
+            }
+            debug("%c -> %c [%d]", displayedChar, areaChar, displayedChar == areaChar);
+            int isForeground = 0; // also used as layer lol
+            int isSnake = 0;
+            LPCWSTR filename;
+            LPCWSTR emptyfilename;
+            switch (areaChar) {
+                case WALL:
+                    isForeground = 0;
+                    filename = WALLPATH;
+                    break;
+                case FOOD:
+                    isForeground = 1;
+                    filename = FOODPATH;
+                    break;
+                case SNAKE: // special snake rendering
+                    isForeground = 1;
+                    isSnake = 1;
+                    filename = SNAKEHEADPATH;
+                    break;
+                default:
+                    isForeground = 0;
+                    filename = (x+y)%2 == 0 ? TILEFULLPATH : TILEHOLLOWPATH;
+            }
+
+            // clean up the current tile there
+            debug("FG: %p", SNAKEGAME_FOREGROUND[y][x]);
+            debug("BG: %p", SNAKEGAME_BACKGROUND[y][x]);
+            if (SNAKEGAME_FOREGROUND[y][x] != NULL) {
+                debug("CLEAN UP FG");    
+                freeImageArray(SNAKEGAME_FOREGROUND[y][x]);
+                SNAKEGAME_FOREGROUND[y][x] = NULL;
+            }
+            if (SNAKEGAME_BACKGROUND[y][x] != NULL) {  
+                debug("CLEAN UP BG");        
+                freeImageArray(SNAKEGAME_BACKGROUND[y][x]);
+                SNAKEGAME_BACKGROUND[y][x] = NULL;
+            }
+
+            ImageArray* tileimg = loadimage(filename, isForeground);
+            // if its a foreground, also draw the empty square
+            if (isForeground) {
+                emptyfilename = (x+y)%2 == 0 ? TILEFULLPATH : TILEHOLLOWPATH;
+                SNAKEGAME_BACKGROUND[y][x] = loadimage(emptyfilename, 0);
+                SNAKEGAME_FOREGROUND[y][x] = tileimg;
+                SNAKEGAME_BACKGROUND[y][x]->size = v2(30, 30);
+                SNAKEGAME_BACKGROUND[y][x]->position = v2(150 + x*30, 150 + y*30);
+                
+                // set fg
+                SNAKEGAME_FOREGROUND[y][x] = tileimg;
+                free(emptyfilename);
+            } else {
+                // set bg
+                SNAKEGAME_BACKGROUND[y][x] = tileimg;
+            }
+            if (tileimg == NULL) continue;
+            // stanard pos and sizes
+            // these r got from trial and error lolz
+            tileimg->size = v2(30, 30);
+            tileimg->position = v2(150 + x*30, 150 + y*30);
+            free(filename);
+            AREADISPLAYED[y][x] = AREA[y][x];
+        }
+    }
+}
+
+void movesnake(Vector2 direction) {
+    if (v2equality(direction, v2(0,0))) return;
+    Vector2 lastpos;
+    Vector2 futurepos = v2add(direction, SNAKE_ARR[0]);
+    
+    char objInWay = getareapoint(futurepos);
+    removeSnakeFromArea();
+    for (int i=0; i<SNAKE_ARR_LEN; i++) {
+        Vector2 snakebody = SNAKE_ARR[i]; // pos
+        // is it the head?
+        if (i==0) {
+            lastpos = snakebody;
+            SNAKE_ARR[i] = futurepos;
+            debug("New SNAKE POS: "); printv2(SNAKE_ARR[i]); printf("\n");
+            continue;
+        }
+        // if its not the head, then advance
+        // the body to where the previous one was
+        SNAKE_ARR[i] = lastpos;
+        lastpos = snakebody;
+    }
+    returnSnakeFromArea();
+
+    printarea();
+
+    updateDisplayedArea();
+    // updateareabackground();
+    // updateareaforeground();
 }
 
 // ------- uMsg HANDLER FUNCTIONS ------- //
@@ -784,20 +1215,28 @@ ImageArray* loadimage(LPCWSTR image_or_folder_name, double layer) {
 void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     debug("CREATE");
     
-    // create the tiles
-    LPCWSTR tilefullpath = concatPaths(2, BMPPATH, L"tilefull");
-    LPCWSTR tilehollowpath = concatPaths(2, BMPPATH, L"tilehollow");
-    for (int y = 0; y<SIZE; y++) {
-        for (int x = 0; x<SIZE; x++) {
-            ImageArray* tileimg = loadimage(((x+y)%2 == 0 ? tilefullpath : tilehollowpath), 100);
-            SNAKEGAME_TILES[SIZE*y + x] = tileimg;
-            // these values r from trial and error lol
-            // im not gonna go do math just to perfectly
-            // align everything
-            tileimg->size = (Vector2) {.x = 30, .y = 30};
-            tileimg->position = (Vector2) {.x = 150 + x*30, .y = 150 + y*30};
-        }
+    initarrays();
+
+    // Places the blocks surrounding the playing field
+    for (int y=0; y<SIZE; y++) {
+        for (int x=0; x<SIZE; x++) {
+            // if its at the top, bottom, or side
+            if (y == 0 || y == (SIZE-1) || x == 0 || x == (SIZE - 1)) {
+                // placeobject(WALL, pos);
+                placeareapoint(v2(x,y), WALL);
+                // AREA[y][x] = WALL;
+                continue;
+            }
+        }   
     }
+    newSnakePart(v2(1,1));
+    returnSnakeFromArea(); // blits the snake basically. no idea why i chose to do it this way
+    generatefood(NUM_OF_FOOD);
+
+    updateDisplayedArea();
+    // updateareabackground();
+    // updateareaforeground();
+    
 
     printdraworder();
 
@@ -844,6 +1283,7 @@ void OnPaint(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
         for (int i = 0; i<IMAGES_LOADED; i++) {
             ImageArray *imagedat = MEM_IMAGES[i];
+            if (imagedat == NULL) continue; // if its in the process of being deleted
             if (!imagedat->enabled) continue; // skip all disabled frames
             
             // update currframe
@@ -911,6 +1351,7 @@ void OnPaint(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 void OnDestroy(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     debug("STOP");
     THREAD_RUNNING = 0;
+
     // clean up the entire MEM_IMAGES array
     for (int i = 0; i<IMAGES_LOADED; i++) {
         ImageArray *imagedat = MEM_IMAGES[i];
@@ -972,8 +1413,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         // keyborad up
         case WM_KEYUP:;
             long long KEYCODE_UP = (long long)LOWORD(wParam);  // 64 bits
-
+            Vector2 movedir = wasddirection(KEYCODE_UP);
             debug("key up, %c %d", (char) KEYCODE_UP, (int) KEYCODE_UP); 
+            printv2(movedir);
+            movesnake(movedir);
             if (KEYCODE_UP == VK_ESCAPE) { // escape key
                 PostMessage(hwnd, WM_DESTROY, 0, 0);
             }
