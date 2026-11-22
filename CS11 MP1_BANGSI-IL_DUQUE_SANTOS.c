@@ -102,11 +102,24 @@ Credits to very useful resources used throughout the project:
 #define SCOREPATH       concatPaths(3, BMPPATH, L"snakegame", L"score")
 #define LOSERPATH       concatPaths(3, BMPPATH, L"snakegame", L"youdied")
 #define WINNERPATH       concatPaths(3, BMPPATH, L"snakegame", L"youwin")
+#define PLAYAGAINBTNPATH       concatPaths(4, BMPPATH, L"snakegame", L"buttons", L"playagain")
 
-// each cardinal direction
+// keeping it shrimple
 #define SNAKEHEADPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakehead.bmp")
-#define SNAKEBODYPATH // unused rn
-#define SNAKETAILPATH // unused rn
+#define SNAKEBODYPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakebody.bmp")
+#define SNAKETAILPATH   concatPaths(3, BMPPATH, L"snakegame", L"snaketail.bmp")
+
+// each cardinal direction      update: too hard to implement.
+// #define SNAKEHEADNPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadN.bmp")
+// #define SNAKEHEADSPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadS.bmp")
+// #define SNAKEHEADWPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadW.bmp")
+// #define SNAKEHEADEPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadE.bmp")
+// #define SNAKEBODYHPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakebodyhorizontal.bmp")
+// #define SNAKEBODYVPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakebodyvertical.bmp")
+// #define SNAKETAILNPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailN.bmp")
+// #define SNAKETAILSPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailS.bmp")
+// #define SNAKETAILWPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailW.bmp")
+// #define SNAKETAILEPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailE.bmp")
 
 // numeral paths, so tedious...
 #define NUMERALSPACING  3 // how far apart each number is in pixels
@@ -314,6 +327,10 @@ int SCORE = 0;          // in game score
 int CURR_FOOD = MAX_FOOD; // current amount of food
 int WINNER = 0; // if snake won or not
 
+// last direction snake went
+// to forbid player from moving inside itself
+Vector2 previousdir = {.x = 0, .y = 0};
+
 // -- GAME OBJECTS -- //
 // snake game 
 ImageArray* SNAKEGAME_BACKGROUND[SIZE][SIZE]; // contains the tile images.
@@ -322,6 +339,8 @@ ImageArray* DIEDINDICATOR = NULL;
 ImageArray* WINNERCARD = NULL;
 ImageArray* LOSERCARD = NULL;
 ImageArray* SCORECARD = NULL;
+ImageArray* PLAYAGAINBUTTON = NULL;
+int PLAYAGAINBUTTON_HOVERED = 0;
 
 // numerals
 ImageArray* NUMERALS[100]; // i dont feel like reallocing
@@ -386,6 +405,7 @@ Vector2 v2(int x, int y) {
 
 // prints an Vector2
 void printv2(Vector2 v2) {
+    if (!DEBUG_MODE) return;
     print("(%d, %d)", v2.x, v2.y);
 }
 
@@ -395,6 +415,13 @@ void printv2(Vector2 v2) {
 /// @return added v2
 Vector2 v2add(Vector2 vec1, Vector2 vec2) {
     return v2(vec1.x + vec2.x, vec1.y + vec2.y);
+}
+
+/// @brief applies unary minus to vec
+/// @param vec 
+/// @return neg veg
+Vector2 v2unary(Vector2 vec) {
+    return v2(-vec.x, -vec.y);
 }
 
 /// @brief check if two vectors have the exact same components
@@ -558,7 +585,7 @@ void freeImageArray(ImageArray* ptrImageArray) {
     if (fromIndex != ptrImageArray) {
         werror(L"Mismatching pointer given to free [%p] and actually found [%p]", ptrImageArray, fromIndex);
     }
-    wdebug(L"Freeing image %p [%s]", ptrImageArray, ptrImageArray->name);
+    // wdebug(L"Freeing image %p [%s]", ptrImageArray, ptrImageArray->name);
     MEM_IMAGES[index] = NULL; // mark as being deleted, so WM_PAINT doesnt accidentally try to draw garbage data
     for (int j = 0; j<ptrImageArray->frames; j++) { // for each image loaded, delete HBITMAP
         Image image = *(ptrImageArray->image_pointer + j);
@@ -1332,10 +1359,16 @@ void updateDisplayedArea() {
                     isForeground = 1;
                     filename =(LPWSTR)  FOODPATH;
                     break;
-                case SNAKE: // special snake rendering
+                case SNAKE:
+                    // i wanted to make the snake connetced like how it is in google snake
+                    // game but its too difficult for how ive setup rendering here so im
+                    // just gonna throw the towel and render blobs.
+                    // also fun fact this function is way more efficient than i intended it
+                    // to be so literally only one part of the snake gets updated
                     isForeground = 1;
                     isSnake = 1;
-                    filename =(LPWSTR)  SNAKEHEADPATH;
+                    filename = (LPWSTR) SNAKEHEADPATH; //(getareapoint(v2(14, 7)) == PORTAL ? SNAKEBODYPATH : SNAKEHEADPATH); // weird ass edge case
+                    
                     break;
                 case PORTAL:
                     isForeground = 1;
@@ -1359,8 +1392,8 @@ void updateDisplayedArea() {
                 freeImageArray(SNAKEGAME_BACKGROUND[y][x]);
                 SNAKEGAME_BACKGROUND[y][x] = NULL;
             }
-
-            ImageArray* tileimg = loadimage(filename, isForeground);
+            ImageArray* tileimg = NULL;
+            tileimg = loadimage(filename, isForeground);
             // if its a foreground, also draw the empty square
             if (isForeground) {
                 emptyfilename = (LPWSTR)  ((x+y)%2 == 0 ? TILEFULLPATH : TILEHOLLOWPATH);
@@ -1371,13 +1404,14 @@ void updateDisplayedArea() {
                     wherethehelleverythingis.x + x*30, 
                     wherethehelleverythingis.y + y*30
                 );
-                SNAKEGAME_BACKGROUND[y][x]->framecount = FRAME_LIFETIME % SNAKEGAME_BACKGROUND[y][x]->frames;
+                // SNAKEGAME_BACKGROUND[y][x]->framecount = FRAME_LIFETIME % SNAKEGAME_BACKGROUND[y][x]->frames;
                 
                 // set fg
                 SNAKEGAME_FOREGROUND[y][x] = tileimg;
                 free(emptyfilename); // SHUT UP!!! I DONT CARE ABOUT THE CONST QUALIFIER!! DAMN WARNINGS
             } else {
                 // set bg
+                // snake will never be abckground its fine
                 SNAKEGAME_BACKGROUND[y][x] = tileimg;
             }
             if (tileimg == NULL) continue;
@@ -1391,6 +1425,30 @@ void updateDisplayedArea() {
             free(filename);
             AREADISPLAYED[y][x] = AREA[y][x];
         }
+    }
+
+    for (int i = 1; i<SNAKE_ARR_LEN; i++) {
+        Vector2 pos = SNAKE_ARR[i];
+        // printv2(pos);
+        // if is outside bounds, ignore
+        if (pos.x > SIZE-1 || pos.x < 0 ||
+            pos.y > SIZE-1 || pos.x < 0 ||
+            v2equality(pos, v2(14, 7)) // portal coords, this is probably the SHITTIEST way to do this but i dont care
+        ) continue;
+        // override
+        // printv2(pos);
+        // wdebug(L"Override %p [%s]", SNAKEGAME_FOREGROUND[pos.y][pos.x], SNAKEGAME_FOREGROUND[pos.y][pos.x]->name);
+        freeImageArray(SNAKEGAME_FOREGROUND[pos.y][pos.x]);
+        LPCWSTR newfilename;
+        if (i == SNAKE_ARR_LEN-1) {
+            newfilename = SNAKETAILPATH;
+        } else newfilename = SNAKEBODYPATH;
+        SNAKEGAME_FOREGROUND[pos.y][pos.x] = loadimage(newfilename, 1);
+        SNAKEGAME_FOREGROUND[pos.y][pos.x]->size = v2(30, 30);
+        SNAKEGAME_FOREGROUND[pos.y][pos.x]->position = v2(
+            wherethehelleverythingis.x + pos.x*30, 
+            wherethehelleverythingis.y + pos.y*30
+        );
     }
 }
 
@@ -1427,6 +1485,7 @@ void movesnake(Vector2 direction) {
     removeSnakeFromArea();
     
     // advance the snake
+    int outside = 0;
     for (int i=0; i<SNAKE_ARR_LEN; i++) {
         Vector2 snakebody = SNAKE_ARR[i]; // pos
         // is it the head?
@@ -1434,13 +1493,26 @@ void movesnake(Vector2 direction) {
             lastpos = snakebody;
             SNAKE_ARR[i] = futurepos;
             debug("New SNAKE POS: "); printv2(SNAKE_ARR[i]); printf("\n");
-            continue;
+        } else {
+            // if its not the head, then advance
+            // the body to where the previous one was
+            SNAKE_ARR[i] = lastpos;
+            lastpos = snakebody;
         }
-        // if its not the head, then advance
-        // the body to where the previous one was
-        SNAKE_ARR[i] = lastpos;
-        lastpos = snakebody;
+        // check if the snake is outside the map
+        if (SNAKE_ARR[i].x > SIZE-1 || SNAKE_ARR[i].x < 0 ||
+            SNAKE_ARR[i].y > SIZE-1 || SNAKE_ARR[i].x < 0
+        ) outside++;
     }
+
+    // if all outside, winner!
+    if (outside >= SNAKE_ARR_LEN) {
+        debug("WINNER");
+        GAME_OVER = 1;
+        ANIMATE_BOARD_DISAPPEAR = 1;
+        WINNER = 1;
+    }
+    
 
     // gotta handle this here just so i dont have to do
     // any math
@@ -1481,14 +1553,35 @@ void SNAKE_GAME() {
     varloadimage(DIEDINDICATOR, DIEDPATH, 10000); // anim for death
     DIEDINDICATOR->enabled = 0;
     DIEDINDICATOR->size = v2(75, 75);
-    varloadimage(SCORECARD, SCOREPATH, 100);
+    SCORECARD->enabled = 1;
     SCORECARD->size = v2(
         WINDOWWIDTH*0.3,
         WINDOWHEIGHT*0.1
     );
+
     SCORECARD->position = v2(
         WINDOWWIDTH/2 - SCORECARD->size.x/2,
         WINDOWHEIGHT*0
+    );
+
+    LOSERCARD->size = v2(
+        DIFFICULTYPROMPT->size.x,
+        DIFFICULTYPROMPT->size.y
+    );
+
+    LOSERCARD->position = v2(
+        DIFFICULTYPROMPT->position.x,
+        DIFFICULTYPROMPT->position.y - 200
+    );
+
+    WINNERCARD->size = v2(
+        LOSERCARD->size.x,
+        LOSERCARD->size.y
+    );
+
+    WINNERCARD->position = v2(
+        LOSERCARD->position.x,
+        LOSERCARD->position.y
     );
     displayNumerals(SCORE, 
         v2(
@@ -1497,27 +1590,23 @@ void SNAKE_GAME() {
         ),
         50
     );
-    varloadimage(LOSERCARD, LOSERPATH, 100);
-    LOSERCARD->size = v2(
-        DIFFICULTYPROMPT->size.x,
-        DIFFICULTYPROMPT->size.y
-    );
-    LOSERCARD->position = v2(
-        DIFFICULTYPROMPT->position.x,
-        DIFFICULTYPROMPT->position.y
-    );
-    varloadimage(WINNERCARD, WINNERPATH, 100);
-    WINNERCARD->size = v2(
-        DIFFICULTYPROMPT->size.x,
-        DIFFICULTYPROMPT->size.y
-    );
-    WINNERCARD->position = v2(
-        DIFFICULTYPROMPT->position.x,
-        DIFFICULTYPROMPT->position.y
-    );
-    
-    LOSERCARD->enabled = 0;
-    WINNERCARD->enabled = 0;
+
+    // for some reason, if i load PLAYAGAINBUTTON here
+    // it just bugs out PLAY and INSTRUCTIONS button
+    // but i put it in main menu
+    // its all good?!?!?
+    // weirdest bug ever
+    // varloadimage(PLAYAGAINBUTTON, PLAYAGAINBTNPATH, 100);
+    // PLAYAGAINBUTTON->size = v2(
+    //     WINDOWWIDTH*0.3,
+    //     WINDOWHEIGHT*0.25
+    // );
+    // PLAYAGAINBUTTON->position = v2(
+    //     WINDOWWIDTH/2 - PLAYAGAINBUTTON->size.x/2,
+    //     WINDOWHEIGHT*0.4
+    // );
+    // PLAYAGAINBUTTON->enabled = 0;
+
 
     initarrays();
 
@@ -1553,6 +1642,7 @@ void SNAKE_GAME() {
 /// @brief show options menu
 /// @param hwnd 
 void PLAYBUTTON_FUNC(HWND hwnd) {
+    debug("PLAY BUTTON");
     PLAYBUTTON->enabled = 0;
     INSTRUCTIONSBUTTON->enabled = 0;
     EXITBUTTON->enabled = 0;
@@ -1560,11 +1650,14 @@ void PLAYBUTTON_FUNC(HWND hwnd) {
     DIFFICULTYPROMPT->enabled = 1;
     EASYBUTTON->enabled = 1;
     DIFFICULTBUTTON->enabled = 1;
+
+    printdraworder();
 }
 
 /// @brief show instructions and disable the other buttons
 /// @param hwnd 
 void INSTRUCTIONSBUTTON_FUNC(HWND hwnd) {
+    debug("INSTRUCTIONS BUTTON");
     HOWTOPLAYCARD->enabled = 1;
     CLOSEINSTBUTTON->enabled = 1;
     PLAYBUTTON->enabled = 0;
@@ -1710,9 +1803,30 @@ void MAIN_MENU() {
     varloadimage(DOWNBUTTON, DOWNBTNPATH, 100);
     varloadimage(CONFIRMBUTTON, CONFIRMBTNPATH, 100);
 
+    // snake game
+    varloadimage(SCORECARD, SCOREPATH, 100);
+    varloadimage(LOSERCARD, LOSERPATH, 100);
+    varloadimage(WINNERCARD, WINNERPATH, 100);
+    varloadimage(PLAYAGAINBUTTON, PLAYAGAINBTNPATH, 100);
+
     // making it look fire
     // these sizes and positions r got from trial
     // and error lol. 
+
+    PLAYAGAINBUTTON->size = v2(
+        WINDOWWIDTH*0.3,
+        WINDOWHEIGHT*0.25
+    );
+
+    PLAYAGAINBUTTON->position = v2(
+        WINDOWWIDTH/2 - PLAYAGAINBUTTON->size.x/2,
+        WINDOWHEIGHT*0.4
+    );
+    
+    SCORECARD->enabled = 0;
+    LOSERCARD->enabled = 0;
+    WINNERCARD->enabled = 0;
+    PLAYAGAINBUTTON->enabled = 0;
 
     // option
     DIFFICULTYPROMPT->size = v2(
@@ -1880,6 +1994,26 @@ void MAIN_MENU() {
         WINDOWHEIGHT/2 - EXITBUTTON->size.y/2 + WINDOWHEIGHT*0.245
     );
 
+    // enable them if we just finished a game
+    TITLECARD->enabled = 1;
+    EXITBUTTON->enabled = 1;
+    PLAYBUTTON->enabled = 1;
+    INSTRUCTIONSBUTTON->enabled = 1;
+}
+
+/// @brief return to menu. have to put this here since it has to run MAIN_MENU()
+/// @param hwnd 
+void PLAYAGAINBUTTON_FUNC(HWND hwnd) {
+    // freeImageArray(WINNERCARD);
+    // freeImageArray(LOSERCARD);
+    // // freeImageArray(PLAYAGAINBUTTON);
+    // freeImageArray(SCORECARD);
+    WINNERCARD->enabled = 0;
+    LOSERCARD->enabled = 0;
+    WINNERCARD->enabled = 0;
+    PLAYAGAINBUTTON->enabled = 0;
+    clearNumerals();
+    MAIN_MENU();
 }
 
 // ------- functions that i need to put at the bottom lol ------- //
@@ -1889,11 +2023,37 @@ void MAIN_MENU() {
 void clearSnakeGame() {
     SNAKE_ARR_LEN = 0; // we dont rlly need to clear it
     clearBGFG();
+    clearNumerals();
     freeImageArray(DIEDINDICATOR);
     DIEDINDICATOR = NULL;
+    // DIEDINDICATOR->enabled = 0;
+    // DIEDINDICATOR->currframe = 0;
+    // DIEDINDICATOR->framecount = 0;
+
+    // reset back to default
+    previousdir = v2(0,0);
+    pos = v2(0,0);
+    stepdir = RIGHT;
+    turns = 0;
+    steps = SIZE-1;
+    stepsTaken = 0;
     
     LOSERCARD->enabled = !WINNER;
     WINNERCARD->enabled = WINNER;
+    PLAYAGAINBUTTON->enabled = 1;
+    EXITBUTTON->enabled = 1;
+
+    SCORECARD->position = v2(
+        WINDOWWIDTH/2 - SCORECARD->size.x/2,
+        LOSERCARD->position.y + SCORECARD->size.y + 50
+    );
+    displayNumerals(SCORE, 
+        v2(
+            WINDOWWIDTH/2,
+            SCORECARD->position.y + 100
+        ),
+        70
+    );
 }
 
 
@@ -1971,6 +2131,9 @@ unsigned __stdcall thread(void *args) {
             hoverlogic(CONFIRMBUTTON);
             hoverlogic(UPBUTTON);
             hoverlogic(DOWNBUTTON);
+
+            // snake game (only appears after death)
+            hoverlogic(PLAYAGAINBUTTON);
         }
 
         // the spiral effect
@@ -2158,13 +2321,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             MOUSE.x = (int) LOWORD(lParam);
             break;
         // left mosue down
-        case WM_LBUTTONDOWN:
-            debug("m1 down");
-            // SendMessage(hwnd, WM_PAINT, wParam, lParam);
-            break;
+        // case WM_LBUTTONDOWN:
+        //     debug("m1 down");
+        //     // SendMessage(hwnd, WM_PAINT, wParam, lParam);
+        //     break;
         // left mouse button up
         case WM_LBUTTONUP: 
-            debug("m1 up");
+            // debug("m1 up");
             // clearBGFG();
             if (GAME_OVER) {
                 // main menu
@@ -2178,14 +2341,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 buttonlogic(UPBUTTON, hwnd);
                 buttonlogic(DOWNBUTTON, hwnd);
                 buttonlogic(CONFIRMBUTTON, hwnd);
+                // snake game (after death)
+                buttonlogic(PLAYAGAINBUTTON, hwnd);
             }
             break;
         // keyborad down
-        case WM_KEYDOWN:;
-            long long KEYCODE_DOWN = (long long)LOWORD(wParam);
+        // case WM_KEYDOWN:;
+        //     long long KEYCODE_DOWN = (long long)LOWORD(wParam);
 
-            debug("key down, %c %lld", (char) KEYCODE_DOWN, KEYCODE_DOWN); 
-            break;
+        //     debug("key down, %c %lld", (char) KEYCODE_DOWN, KEYCODE_DOWN); 
+        //     break;
         // keyborad up
         case WM_KEYUP:;
             long long KEYCODE_UP = (long long)LOWORD(wParam);  // 64 bits
@@ -2193,10 +2358,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // printv2(movedir);
             // if the game is running then move the snakee
             if (!GAME_OVER) {
-            // Vector2 movedir = wasddirection(KEYCODE_UP);
+                Vector2 movedir = wasddirection(KEYCODE_UP);
+                if (v2equality( // if trying to move directly back right after
+                        movedir,
+                        v2unary(previousdir)
+                    )) break;
                 movesnake(wasddirection(KEYCODE_UP));
+                previousdir = movedir;
             }
-            if (KEYCODE_UP == VK_ESCAPE) { // escape key
+            if (KEYCODE_UP == VK_ESCAPE || KEYCODE_UP == 'Q') { // escape key
                 PostMessage(hwnd, WM_DESTROY, 0, 0);
             }
             break;
