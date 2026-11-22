@@ -2357,6 +2357,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             debug("key up, %c %d", (char) KEYCODE_UP, (int) KEYCODE_UP); 
             // printv2(movedir);
             // if the game is running then move the snakee
+            
+            // my dumbass thought 'Q' would quit the program lol
+            if (KEYCODE_UP == 'Q' && !GAME_OVER) {
+                debug("force menu");
+                GAME_OVER = 1;
+                ANIMATE_BOARD_DISAPPEAR = 1;
+                WINNER = 0;
+            }
             if (!GAME_OVER) {
                 Vector2 movedir = wasddirection(KEYCODE_UP);
                 if (v2equality( // if trying to move directly back right after
@@ -2366,7 +2374,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 movesnake(wasddirection(KEYCODE_UP));
                 previousdir = movedir;
             }
-            if (KEYCODE_UP == VK_ESCAPE || KEYCODE_UP == 'Q') { // escape key
+            if (KEYCODE_UP == VK_ESCAPE) { // escape key
                 PostMessage(hwnd, WM_DESTROY, 0, 0);
             }
             break;
