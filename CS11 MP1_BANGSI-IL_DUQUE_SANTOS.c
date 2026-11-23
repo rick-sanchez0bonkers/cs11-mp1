@@ -1530,9 +1530,18 @@ void movesnake(Vector2 direction) {
         );
     }
 
-    // spawn in a portal
+    // spawn in a portal and kill all obstacles
     if (CURR_FOOD == 0 && getareapoint(v2(14,7)) != PORTAL) {
         placeareapoint(v2(14, 7), PORTAL);
+
+        for (int y = 0; y<SIZE-1; y++) {
+            for (int x = 0; x<SIZE-1; x++) {
+                Vector2 pos = v2(x,y);
+                if (getareapoint(pos) == BLOCK) {
+                    placeareapoint(pos, EMPTY);
+                }
+            }
+        }
     }
 
     returnSnakeFromArea();
@@ -2296,6 +2305,34 @@ void OnDestroy(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     PostQuitMessage(0); // this POSTS a msg of WM_QUIT, causing the message loop to end 
 }
 
+void OnKeyUp(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+    long long KEYCODE_UP = (long long)LOWORD(wParam);  // 64 bits
+    debug("key up, %c %d", (char) KEYCODE_UP, (int) KEYCODE_UP); 
+    // printv2(movedir);
+    // if the game is running then move the snakee
+    
+    // my dumbass thought 'Q' would quit the program lol
+    if (KEYCODE_UP == 'Q' && !GAME_OVER) {
+        debug("force menu");
+        GAME_OVER = 1;
+        ANIMATE_BOARD_DISAPPEAR = 1;
+        WINNER = 0;
+    }
+    if (!GAME_OVER) {
+        Vector2 movedir = wasddirection(KEYCODE_UP);
+        if (!v2equality( // if trying to move directly back right after
+                movedir,
+                v2unary(previousdir)
+            )) {
+            movesnake(wasddirection(KEYCODE_UP));
+            previousdir = movedir;
+        }
+    }
+    if (KEYCODE_UP == VK_ESCAPE) { // escape key
+        PostMessage(hwnd, WM_DESTROY, 0, 0);
+    }
+}
+
 // this is where ALL events are sent to
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
@@ -2353,30 +2390,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         //     break;
         // keyborad up
         case WM_KEYUP:;
-            long long KEYCODE_UP = (long long)LOWORD(wParam);  // 64 bits
-            debug("key up, %c %d", (char) KEYCODE_UP, (int) KEYCODE_UP); 
-            // printv2(movedir);
-            // if the game is running then move the snakee
-            
-            // my dumbass thought 'Q' would quit the program lol
-            if (KEYCODE_UP == 'Q' && !GAME_OVER) {
-                debug("force menu");
-                GAME_OVER = 1;
-                ANIMATE_BOARD_DISAPPEAR = 1;
-                WINNER = 0;
-            }
-            if (!GAME_OVER) {
-                Vector2 movedir = wasddirection(KEYCODE_UP);
-                if (v2equality( // if trying to move directly back right after
-                        movedir,
-                        v2unary(previousdir)
-                    )) break;
-                movesnake(wasddirection(KEYCODE_UP));
-                previousdir = movedir;
-            }
-            if (KEYCODE_UP == VK_ESCAPE) { // escape key
-                PostMessage(hwnd, WM_DESTROY, 0, 0);
-            }
+            OnKeyUp(hwnd, uMsg, wParam, lParam);
             break;
         default:
             // default behavior for unhandled uMsg
@@ -2399,7 +2413,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     debug("Verified required files\n");
 
     // initialize the prerequisites for creating a window process
-    LPCWSTR CLASSNAME = L"peepoo"; // this is what appears in task manager
+    LPCWSTR CLASSNAME = L"snakegamer"; // this is what appears in task manager
     WNDCLASS windowclass = {
         .lpfnWndProc = WindowProc,
         .hInstance = hInstance,
