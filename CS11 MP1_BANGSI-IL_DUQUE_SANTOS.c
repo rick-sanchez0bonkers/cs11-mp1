@@ -1401,6 +1401,7 @@ void updateDisplayedArea() {
         for (int x = 0; x<SIZE; x++) {
             char areaChar = AREA[y][x];
             char displayedChar = AREADISPLAYED[y][x];
+            printf("%c ", areaChar);
             if (areaChar == displayedChar) {  // do nothing if its the same
                 // debug("SKIP (%d, %d)", x,y); 
                 continue;
@@ -1499,20 +1500,16 @@ void updateDisplayedArea() {
             free(filename);
             AREADISPLAYED[y][x] = AREA[y][x];
         }
+        print("");
     }
 
     // handle rotation and dealing with curves
     // gross
-    int rot = SNAKEGAME_FOREGROUND[SNAKE_ARR[0].y][SNAKE_ARR[0].x]->rotation; // rotation is cummulative for each bodypart
+    int rot = snakeRot; // rotation is cummulative for each bodypart
     for (int i = 1; i<SNAKE_ARR_LEN; i++) {
         Vector2 pos = SNAKE_ARR[i];
         Vector2 nextpos = SNAKE_ARR[i-1];
-        // printv2(pos);
-        // if is outside bounds, ignore
-        if (pos.x > SIZE-1 || pos.x < 0 ||
-            pos.y > SIZE-1 || pos.x < 0 ||
-            v2equality(pos, v2(14, 7)) // portal coords, this is probably the SHITTIEST way to do this but i dont care
-        ) continue;
+        printv2(pos);
         
         // calculate rotation
         Vector2 previousdirBodyDir;
@@ -1526,10 +1523,16 @@ void updateDisplayedArea() {
         double dir = forwardDir.x*previousdirBodyDir.y - forwardDir.y*previousdirBodyDir.x;
         printv2(forwardDir);
         printv2(previousdirBodyDir);
-        debug("dir: %lf", dir);
+        // debug("dir: %lf", dir);
         rot -= 90.0*dir;
 
         int internalRot = rot;
+        
+        // if is outside bounds, ignore
+        if (pos.x > SIZE-1 || pos.x < 0 ||
+            pos.y > SIZE-1 || pos.x < 0 ||
+            v2equality(pos, v2(14, 7)) // portal coords, this is probably the SHITTIEST way to do this but i dont care
+        ) continue;
         
         // override
         // wdebug(L"Override %p [%s]", SNAKEGAME_FOREGROUND[pos.y][pos.x], SNAKEGAME_FOREGROUND[pos.y][pos.x]->name);
@@ -1621,6 +1624,8 @@ void movesnake(Vector2 direction) {
             SNAKE_ARR[i].y > SIZE-1 || SNAKE_ARR[i].x < 0
         ) outside++;
     }
+
+    // debug("outside: %d", outside);
 
     // if all outside, winner!
     if (outside >= SNAKE_ARR_LEN) {
@@ -2503,6 +2508,15 @@ void OnKeyUp(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     if (!GAME_OVER) {
         Vector2 movedir = wasddirection(KEYCODE_UP);
         currdir = movedir;
+        // if outside the bounds, disable everything except RIGHT
+        // needed because doing aything else bugs the rotation system
+        if (SNAKE_ARR[0].x > SIZE-1 || SNAKE_ARR[0].x < 0 ||
+            SNAKE_ARR[0].y > SIZE-1 || SNAKE_ARR[0].x < 0
+        ) {
+            if (!v2equality(movedir, RIGHT)) {
+                return;
+            }
+        }
         if (!(v2equality( // if trying to move directly back right after
                 movedir,
                 v2unary(previousdir)
