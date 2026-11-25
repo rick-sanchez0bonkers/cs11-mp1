@@ -12,7 +12,7 @@ Date Started:
     November 9, 2026
 
 Date Finished:
-    November 25, 2026
+    November 27, 2026
 
 IMPORTANT INFORMATION:
     To compile on WINDOWS 
@@ -86,6 +86,8 @@ Credits to very useful resources used throughout the project:
 #define WINDOWWIDTH 750          // window width
 #define WINDOWHEIGHT 750         // window height
 
+#define ENABLE_STARS 1
+#define ENABLE_STAR_ROTATION 0 // this is just way too laggy because rendering with rotation is really slow.
 #define NUM_OF_STARS 50
 #define STAR_SPIN_SPEED 1009     // higher = slower
 #define MIN_STAR_SIZE 5
@@ -1910,17 +1912,19 @@ void MAIN_MENU() {
     // bg
     varloadimage(BACKGROUND, BACKGROUNDPATH, -1);
     // sprinkle stars
-    for (int i = 0; i<NUM_OF_STARS; i++) {
-        varloadimage(STARS[i], STARPATH, -2);
-        int randNum = rand() % (MAX_STAR_SIZE - MIN_STAR_SIZE + 1) + MIN_STAR_SIZE;
-        int fps = rand() % (int) (STARS[i]->framerate*2 - STARS[i]->framerate + 1) + STARS[i]->framerate;
-        STARS[i]->position = v2rand(0, WINDOWWIDTH-1, 0, WINDOWHEIGHT-1);
-        STARS[i]->size = v2(randNum, randNum);
-        STARS[i]->framerate = fps;
-        STARDATA[i] = (StarData) {
-            .position = dv2(STARS[i]->position.x, STARS[i]->position.y),
-            .rotationSpeed = rand() % 7 - 3
-        };
+    if (ENABLE_STARS) {
+        for (int i = 0; i<NUM_OF_STARS; i++) {
+            varloadimage(STARS[i], STARPATH, -2);
+            int randNum = rand() % (MAX_STAR_SIZE - MIN_STAR_SIZE + 1) + MIN_STAR_SIZE;
+            int fps = rand() % (int) (STARS[i]->framerate*2 - STARS[i]->framerate + 1) + STARS[i]->framerate;
+            STARS[i]->position = v2rand(0, WINDOWWIDTH-1, 0, WINDOWHEIGHT-1);
+            STARS[i]->size = v2(randNum, randNum);
+            STARS[i]->framerate = fps;
+            STARDATA[i] = (StarData) {
+                .position = dv2(STARS[i]->position.x, STARS[i]->position.y),
+                .rotationSpeed = rand() % 7 - 3
+            };
+        }
     }
 
     // main menu
@@ -2264,19 +2268,23 @@ unsigned __stdcall thread(void *args) {
         // rotate the stars
         // https://stackoverflow.com/questions/620745/c-rotating-a-vector-around-a-certain-point
         double delta = (double) FRAME_LIFETIME / STAR_SPIN_SPEED;
-        for (int i = 0; i < NUM_OF_STARS; i++) {
-            ImageArray* star = STARS[i];
-            StarData dat = STARDATA[i];
+        if (ENABLE_STARS) {
+            for (int i = 0; i < NUM_OF_STARS; i++) {
+                ImageArray* star = STARS[i];
+                StarData dat = STARDATA[i];
 
-            double x = dat.position.x;
-            double y = dat.position.y;
-            double dx = WINDOWWIDTH/2;
-            double dy = WINDOWHEIGHT/2;
-            star->position = v2(
-                ((x - dx) * cos(delta)) - ((y - dy) * sin(delta)) + dx,
-                ((x - dx) * sin(delta)) + ((y - dy) * cos(delta)) + dy
-            );
-            star->rotation = delta*STAR_SPIN_SPEED *dat.rotationSpeed / 10;
+                double x = dat.position.x;
+                double y = dat.position.y;
+                double dx = WINDOWWIDTH/2;
+                double dy = WINDOWHEIGHT/2;
+                star->position = v2(
+                    ((x - dx) * cos(delta)) - ((y - dy) * sin(delta)) + dx,
+                    ((x - dx) * sin(delta)) + ((y - dy) * cos(delta)) + dy
+                );
+                if (ENABLE_STAR_ROTATION) {
+                    star->rotation = delta*STAR_SPIN_SPEED *dat.rotationSpeed / 10;
+                }
+            }
         }
 
         // checks if the main menu buttons are being hovered over
