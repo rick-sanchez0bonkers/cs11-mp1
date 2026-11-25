@@ -12,7 +12,7 @@ Date Started:
     November 9, 2026
 
 Date Finished:
-    November 23, 2026
+    November 25, 2026
 
 IMPORTANT INFORMATION:
     To compile on WINDOWS 
@@ -72,6 +72,12 @@ Credits to very useful resources used throughout the project:
 #include <math.h>
 #include <wchar.h> // https://en.cppreference.com/c/header/wchar for wide strings since file paths are wchar_t/WCHAR
 #include <signal.h> // for aborting
+#include <time.h>
+
+// rlly annoying. why isnt this extern'd?
+#ifndef M_PI
+#define M_PI 3.141592653589793
+#endif
 
 // GRAPHICS CONSTANTS
 #define FRAME_RATE 60            // number of frames per second
@@ -80,6 +86,10 @@ Credits to very useful resources used throughout the project:
 #define WINDOWWIDTH 750          // window width
 #define WINDOWHEIGHT 750         // window height
 
+#define NUM_OF_STARS 50
+#define STAR_SPIN_SPEED 1009     // higher = slower
+#define MIN_STAR_SIZE 5
+#define MAX_STAR_SIZE 20
 #define COLOR_KEY RGB(255,0,255) // this specific color is drawn as completely transparent.
 #define BACKGROUND_COLOR RGB(27, 51, 47)    // background color of the screen
 
@@ -92,6 +102,9 @@ Credits to very useful resources used throughout the project:
 // animation and .bmp can be freely swapped, nothing will
 // break (as long as the file exists)
 //        num. of paths to combine vv  file name vvvvvvvvvv
+#define BACKGROUNDPATH    concatPaths(3, BMPPATH, L"background", L"background")
+#define STARPATH          concatPaths(3, BMPPATH, L"background", L"star")
+
 #define TILEFULLPATH    concatPaths(3, BMPPATH, L"snakegame", L"tilefull.bmp")
 #define TILEHOLLOWPATH  concatPaths(3, BMPPATH, L"snakegame", L"tilehollow.bmp")
 #define WALLPATH        concatPaths(3, BMPPATH, L"snakegame", L"wall.bmp")
@@ -106,20 +119,12 @@ Credits to very useful resources used throughout the project:
 
 // keeping it shrimple
 #define SNAKEHEADPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakehead.bmp")
+#define SNAKEHEADALONEPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadalone.bmp") // a snake head that has no tail yet
 #define SNAKEBODYPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakebody.bmp")
 #define SNAKETAILPATH   concatPaths(3, BMPPATH, L"snakegame", L"snaketail.bmp")
+#define SNAKECURVEDOWNPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakecurvedown.bmp")
+#define SNAKECURVEUPPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakecurveup.bmp")
 
-// each cardinal direction      update: too hard to implement.
-// #define SNAKEHEADNPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadN.bmp")
-// #define SNAKEHEADSPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadS.bmp")
-// #define SNAKEHEADWPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadW.bmp")
-// #define SNAKEHEADEPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakeheadE.bmp")
-// #define SNAKEBODYHPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakebodyhorizontal.bmp")
-// #define SNAKEBODYVPATH   concatPaths(3, BMPPATH, L"snakegame", L"snakebodyvertical.bmp")
-// #define SNAKETAILNPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailN.bmp")
-// #define SNAKETAILSPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailS.bmp")
-// #define SNAKETAILWPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailW.bmp")
-// #define SNAKETAILEPATH    concatPaths(3, BMPPATH, L"snakegame", L"snaketailE.bmp")
 
 // numeral paths, so tedious...
 #define NUMERALSPACING  3 // how far apart each number is in pixels
@@ -273,6 +278,12 @@ typedef struct {
     HBITMAP hbitmap; // the actual rgb information
 } Image;
 
+// star data
+typedef struct {
+    dVector2 position;
+    int rotationSpeed;
+} StarData;
+
 // ImageArray
 typedef struct {
     double layer; // draw order. used to sort the array. lower layer = drawn first
@@ -329,7 +340,10 @@ int WINNER = 0; // if snake won or not
 
 // last direction snake went
 // to forbid player from moving inside itself
-Vector2 previousdir = {.x = 0, .y = 0};
+Vector2 previousdir = {.x = 1, .y = 0};
+// current snake dir to track rotation
+Vector2 currdir = {.x = 0, .y = 0};
+int snakeRot = 0;
 
 // -- GAME OBJECTS -- //
 // snake game 
@@ -349,6 +363,11 @@ size_t NUMERALS_LOADED = 0;
 // why the hell does C not support OOP this is such an ugly
 // way to handle this bruh
 // all textures are initialized by MAIN_MENU
+
+// background
+ImageArray* BACKGROUND = NULL;
+ImageArray* STARS[NUM_OF_STARS];
+StarData STARDATA[NUM_OF_STARS]; // contains the star pos
 
 // main menu
 ImageArray* TITLECARD = NULL;
@@ -403,6 +422,12 @@ Vector2 v2(int x, int y) {
     return (Vector2) {.x = x, .y = y};
 }
 
+
+// double v2
+dVector2 dv2(double x, double y) {
+    return (dVector2) {.x = x, .y = y};
+}
+
 // prints an Vector2
 void printv2(Vector2 v2) {
     if (!DEBUG_MODE) return;
@@ -423,6 +448,14 @@ Vector2 v2add(Vector2 vec1, Vector2 vec2) {
 Vector2 v2unary(Vector2 vec) {
     return v2(-vec.x, -vec.y);
 }
+
+/// @brief returns length of a vector
+/// @param vec 
+/// @return double
+double v2magnitude(Vector2 vec) {
+    return sqrt(vec.x*vec.x + vec.y*vec.y);
+}
+
 
 /// @brief check if two vectors have the exact same components
 /// @param v1 
@@ -483,6 +516,34 @@ ImageArray* newHeapImageArray() {
     return heap;
 }
 
+/// @brief returns an XFORM with a rotation matrix based on the rotation provided
+/// @param rot rotation in degrees
+/// @return XFORM 
+XFORM applyRotation(ImageArray* imagedat) {
+    // https://learn.microsoft.com/en-us/windows/win32/gdi/using-coordinate-spaces-and-transformations?redirectedfrom=MSDN
+    // https://articulatedrobotics.xyz/tutorials/coordinate-transforms/rotation-matrices-2d/
+    double rot = imagedat->rotation * (M_PI/180.0);
+    
+    //  cos(0)    -sin(0)
+    //  sin(0)     cos(0)
+    float c = cosf(rot);
+    float s = sinf(rot);
+
+    double halfH = imagedat->size.y/2.0;
+    double halfW = imagedat->size.x/2.0;
+    
+    XFORM matrix = {
+        .eM11 = c,
+        .eM12 = s,
+        .eM21 = -s,
+        .eM22 = c,
+        .eDx = (imagedat->position.x + halfW) - (halfW * c - halfH * s),
+        .eDy = (imagedat->position.y + halfH) - (halfW * s + halfH * c)
+        // .eDx = 0.0 - (halfW * c - halfH * s),
+        // .eDy = 0.0 - (halfW * s + halfH * c)
+    };
+    return matrix;
+}
 
 /// @brief prints the images stored in memory
 void printmemimages() {
@@ -1331,6 +1392,7 @@ void clearBGFG() {
 /// @brief actually updates the images from what changed in AREA instead of completely deleting
 /// and rebuilding bruh
 void updateDisplayedArea() {
+    // hardcoded pos lol
     Vector2 wherethehelleverythingis = v2(150, 150);
 
     for (int y = 0; y<SIZE; y++) {
@@ -1352,7 +1414,7 @@ void updateDisplayedArea() {
                     filename = (LPWSTR) WALLPATH;
                     break;
                 case BLOCK:
-                    isForeground = 0;
+                    isForeground = 1;
                     filename = (LPWSTR) BLOCKPATH;
                     break;
                 case FOOD:
@@ -1360,14 +1422,13 @@ void updateDisplayedArea() {
                     filename =(LPWSTR)  FOODPATH;
                     break;
                 case SNAKE:
-                    // i wanted to make the snake connetced like how it is in google snake
-                    // game but its too difficult for how ive setup rendering here so im
-                    // just gonna throw the towel and render blobs.
-                    // also fun fact this function is way more efficient than i intended it
-                    // to be so literally only one part of the snake gets updated
                     isForeground = 1;
                     isSnake = 1;
-                    filename = (LPWSTR) SNAKEHEADPATH; //(getareapoint(v2(14, 7)) == PORTAL ? SNAKEBODYPATH : SNAKEHEADPATH); // weird ass edge case
+                    if (SNAKE_ARR_LEN > 1) {
+                        filename = (LPWSTR) SNAKEHEADPATH; //(getareapoint(v2(14, 7)) == PORTAL ? SNAKEBODYPATH : SNAKEHEADPATH); // weird ass edge case
+                    } else {
+                        filename = (LPWSTR) SNAKEHEADALONEPATH;
+                    }
                     
                     break;
                 case PORTAL:
@@ -1383,7 +1444,6 @@ void updateDisplayedArea() {
             // debug("FG: %p", SNAKEGAME_FOREGROUND[y][x]);
             // debug("BG: %p", SNAKEGAME_BACKGROUND[y][x]);
             if (SNAKEGAME_FOREGROUND[y][x] != NULL) {
-                // debug("CLEAN UP FG");    
                 freeImageArray(SNAKEGAME_FOREGROUND[y][x]);
                 SNAKEGAME_FOREGROUND[y][x] = NULL;
             }
@@ -1422,33 +1482,88 @@ void updateDisplayedArea() {
                 wherethehelleverythingis.x + x*30, 
                 wherethehelleverythingis.y + y*30
             );
+
+            // handle rotating the head properly
+            if (isSnake) {
+                // 2d cross prod to determine the relative direction
+                double dir = previousdir.x*currdir.y - previousdir.y*currdir.x;
+                snakeRot += 90*dir;
+                // snakeRot %= 180; // doing this makes the tail rotations flip :/
+                tileimg->rotation = snakeRot;
+                
+                debug("headdir: %lf", dir);
+            }
+
             free(filename);
             AREADISPLAYED[y][x] = AREA[y][x];
         }
     }
 
+    // handle rotation and dealing with curves
+    // gross
+    int rot = SNAKEGAME_FOREGROUND[SNAKE_ARR[0].y][SNAKE_ARR[0].x]->rotation; // rotation is cummulative for each bodypart
     for (int i = 1; i<SNAKE_ARR_LEN; i++) {
         Vector2 pos = SNAKE_ARR[i];
+        Vector2 nextpos = SNAKE_ARR[i-1];
         // printv2(pos);
         // if is outside bounds, ignore
         if (pos.x > SIZE-1 || pos.x < 0 ||
             pos.y > SIZE-1 || pos.x < 0 ||
             v2equality(pos, v2(14, 7)) // portal coords, this is probably the SHITTIEST way to do this but i dont care
         ) continue;
+        
+        // calculate rotation
+        Vector2 previousdirBodyDir;
+        if (i == 1) { // prev = head
+            previousdirBodyDir = currdir;
+        } else {
+            previousdirBodyDir = v2add(SNAKE_ARR[i-2], v2unary(SNAKE_ARR[i]));
+        }
+
+        Vector2 forwardDir = v2add(nextpos, v2unary(pos));
+        double dir = forwardDir.x*previousdirBodyDir.y - forwardDir.y*previousdirBodyDir.x;
+        printv2(forwardDir);
+        printv2(previousdirBodyDir);
+        debug("dir: %lf", dir);
+        rot -= 90.0*dir;
+
+        int internalRot = rot;
+        
         // override
-        // printv2(pos);
         // wdebug(L"Override %p [%s]", SNAKEGAME_FOREGROUND[pos.y][pos.x], SNAKEGAME_FOREGROUND[pos.y][pos.x]->name);
         freeImageArray(SNAKEGAME_FOREGROUND[pos.y][pos.x]);
         LPCWSTR newfilename;
         if (i == SNAKE_ARR_LEN-1) {
             newfilename = SNAKETAILPATH;
-        } else newfilename = SNAKEBODYPATH;
+        } else { // if (i < SNAKE_ARR_LEN - 1) {// corner handling
+            Vector2 previouspos = SNAKE_ARR[i+1];
+            Vector2 backDir = v2add(previouspos, v2unary(pos));
+            double bdir = backDir.x*forwardDir.y - backDir.y*forwardDir.x;
+            // adding their object space should equal to 0
+            double mag = v2magnitude(v2add(v2add(pos, v2unary(nextpos)), v2add(pos, v2unary(previouspos))));
+            if (mag > 0) { // corner
+                debug("corner");
+                if (bdir < 0) {
+                    newfilename = SNAKECURVEDOWNPATH;
+                } else {
+                    newfilename = SNAKECURVEUPPATH;
+                }
+                debug("interalRot: %d, %lf", internalRot, bdir);
+                internalRot += 90*bdir; // undo rot
+                debug("interalRot: %d", internalRot);
+            } else {
+                newfilename = SNAKEBODYPATH;
+            }
+        }
         SNAKEGAME_FOREGROUND[pos.y][pos.x] = loadimage(newfilename, 1);
         SNAKEGAME_FOREGROUND[pos.y][pos.x]->size = v2(30, 30);
         SNAKEGAME_FOREGROUND[pos.y][pos.x]->position = v2(
             wherethehelleverythingis.x + pos.x*30, 
             wherethehelleverythingis.y + pos.y*30
         );
+        debug("rot: %d", internalRot);
+        SNAKEGAME_FOREGROUND[pos.y][pos.x]->rotation = internalRot;
+        debug("rot2: %lf", SNAKEGAME_FOREGROUND[pos.y][pos.x]->rotation);
     }
 }
 
@@ -1791,6 +1906,22 @@ void DOWNBUTTON_FUNC(HWND hwnd) {
 // menu and other stuff
 void MAIN_MENU() {
     // load the images safely without repetition;
+    
+    // bg
+    varloadimage(BACKGROUND, BACKGROUNDPATH, -1);
+    // sprinkle stars
+    for (int i = 0; i<NUM_OF_STARS; i++) {
+        varloadimage(STARS[i], STARPATH, -2);
+        int randNum = rand() % (MAX_STAR_SIZE - MIN_STAR_SIZE + 1) + MIN_STAR_SIZE;
+        int fps = rand() % (int) (STARS[i]->framerate*2 - STARS[i]->framerate + 1) + STARS[i]->framerate;
+        STARS[i]->position = v2rand(0, WINDOWWIDTH-1, 0, WINDOWHEIGHT-1);
+        STARS[i]->size = v2(randNum, randNum);
+        STARS[i]->framerate = fps;
+        STARDATA[i] = (StarData) {
+            .position = dv2(STARS[i]->position.x, STARS[i]->position.y),
+            .rotationSpeed = rand() % 7 - 3
+        };
+    }
 
     // main menu
     varloadimage(TITLECARD, TITLEPATH, 100);
@@ -1821,6 +1952,8 @@ void MAIN_MENU() {
     // making it look fire
     // these sizes and positions r got from trial
     // and error lol. 
+
+    BACKGROUND->size = v2(WINDOWWIDTH, WINDOWHEIGHT);
 
     PLAYAGAINBUTTON->size = v2(
         WINDOWWIDTH*0.3,
@@ -2040,7 +2173,9 @@ void clearSnakeGame() {
     // DIEDINDICATOR->framecount = 0;
 
     // reset back to default
-    previousdir = v2(0,0);
+    previousdir = v2(1,0);
+    currdir = v2(0,0);
+    snakeRot = 0;
     pos = v2(0,0);
     stepdir = RIGHT;
     turns = 0;
@@ -2126,6 +2261,24 @@ unsigned __stdcall thread(void *args) {
     while (THREAD_RUNNING) {
         FRAME_LIFETIME++;
 
+        // rotate the stars
+        // https://stackoverflow.com/questions/620745/c-rotating-a-vector-around-a-certain-point
+        double delta = (double) FRAME_LIFETIME / STAR_SPIN_SPEED;
+        for (int i = 0; i < NUM_OF_STARS; i++) {
+            ImageArray* star = STARS[i];
+            StarData dat = STARDATA[i];
+
+            double x = dat.position.x;
+            double y = dat.position.y;
+            double dx = WINDOWWIDTH/2;
+            double dy = WINDOWHEIGHT/2;
+            star->position = v2(
+                ((x - dx) * cos(delta)) - ((y - dy) * sin(delta)) + dx,
+                ((x - dx) * sin(delta)) + ((y - dy) * cos(delta)) + dy
+            );
+            star->rotation = delta*STAR_SPIN_SPEED *dat.rotationSpeed / 10;
+        }
+
         // checks if the main menu buttons are being hovered over
         if (GAME_OVER) {
             // menu
@@ -2171,7 +2324,7 @@ unsigned __stdcall thread(void *args) {
 void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     debug("CREATE");
     
-
+    srand(time(NULL));
     MAIN_MENU();
 
     // start the frame loop thread
@@ -2260,19 +2413,38 @@ void OnPaint(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
                 error("select obj failed");
             }
 
-            // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-transparentblt
-            // draw on hdcBack
-            // this requires the flag -lmsimg32
-            TransparentBlt(
-                hdcBack,
-                imagedat->position.x, imagedat->position.y,
-                imagedat->size.x,
-                imagedat->size.y,
-                mem,
-                0, 0,
-                bitmap.bmWidth, bitmap.bmHeight,
-                COLOR_KEY
-            );
+            // rotation support
+            if (imagedat->rotation != 0) {
+                XFORM mat = applyRotation(imagedat);
+                int pm = SetGraphicsMode(hdcBack, GM_ADVANCED);
+                SetWorldTransform(hdcBack, &mat);
+                TransparentBlt(
+                    hdcBack,
+                    0,0, // XFORM also handles this :)
+                    imagedat->size.x,
+                    imagedat->size.y,
+                    mem,
+                    0, 0,
+                    bitmap.bmWidth, bitmap.bmHeight,
+                    COLOR_KEY
+                );
+                ModifyWorldTransform(hdcBack, NULL, MWT_IDENTITY);
+                SetGraphicsMode(hdcBack, pm);
+            } else {
+                // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-transparentblt
+                // draw on hdcBack
+                // this requires the flag -lmsimg32
+                TransparentBlt(
+                    hdcBack,
+                    imagedat->position.x, imagedat->position.y,
+                    imagedat->size.x,
+                    imagedat->size.y,
+                    mem,
+                    0, 0,
+                    bitmap.bmWidth, bitmap.bmHeight,
+                    COLOR_KEY
+                );
+            }
         }
 
         SelectObject(mem, old);
@@ -2320,10 +2492,11 @@ void OnKeyUp(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     }
     if (!GAME_OVER) {
         Vector2 movedir = wasddirection(KEYCODE_UP);
-        if (!v2equality( // if trying to move directly back right after
+        currdir = movedir;
+        if (!(v2equality( // if trying to move directly back right after
                 movedir,
                 v2unary(previousdir)
-            )) {
+            ) && SNAKE_ARR_LEN > 1)) {
             movesnake(wasddirection(KEYCODE_UP));
             previousdir = movedir;
         }
