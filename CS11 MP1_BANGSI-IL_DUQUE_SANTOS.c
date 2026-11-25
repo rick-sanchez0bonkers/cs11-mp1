@@ -1911,21 +1911,6 @@ void MAIN_MENU() {
     
     // bg
     varloadimage(BACKGROUND, BACKGROUNDPATH, -1);
-    // sprinkle stars
-    if (ENABLE_STARS) {
-        for (int i = 0; i<NUM_OF_STARS; i++) {
-            varloadimage(STARS[i], STARPATH, -2);
-            int randNum = rand() % (MAX_STAR_SIZE - MIN_STAR_SIZE + 1) + MIN_STAR_SIZE;
-            int fps = rand() % (int) (STARS[i]->framerate*2 - STARS[i]->framerate + 1) + STARS[i]->framerate;
-            STARS[i]->position = v2rand(0, WINDOWWIDTH-1, 0, WINDOWHEIGHT-1);
-            STARS[i]->size = v2(randNum, randNum);
-            STARS[i]->framerate = fps;
-            STARDATA[i] = (StarData) {
-                .position = dv2(STARS[i]->position.x, STARS[i]->position.y),
-                .rotationSpeed = rand() % 7 - 3
-            };
-        }
-    }
 
     // main menu
     varloadimage(TITLECARD, TITLEPATH, 100);
@@ -2333,6 +2318,23 @@ void OnCreate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     debug("CREATE");
     
     srand(time(NULL));
+    
+    // sprinkle stars
+    // has to be here since main_menu() gets calledr epeatedlt
+    if (ENABLE_STARS) {
+        for (int i = 0; i<NUM_OF_STARS; i++) {
+            varloadimage(STARS[i], STARPATH, -2);
+            int randNum = rand() % (MAX_STAR_SIZE - MIN_STAR_SIZE + 1) + MIN_STAR_SIZE;
+            int fps = rand() % (int) (STARS[i]->framerate*2 - STARS[i]->framerate + 1) + STARS[i]->framerate;
+            STARS[i]->position = v2rand(0, WINDOWWIDTH-1, 0, WINDOWHEIGHT-1);
+            STARS[i]->size = v2(randNum, randNum);
+            STARS[i]->framerate = fps;
+            STARDATA[i] = (StarData) {
+                .position = dv2(STARS[i]->position.x, STARS[i]->position.y),
+                .rotationSpeed = rand() % 7 - 3
+            };
+        }
+    }
     MAIN_MENU();
 
     // start the frame loop thread
